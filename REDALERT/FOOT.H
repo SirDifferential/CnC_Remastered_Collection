@@ -64,6 +64,11 @@ class FootClass :	public TechnoClass
 		unsigned IsScanLimited:1;
 
 		/*
+		** Kerekupai: attack move
+		*/ 
+		bool attack_move;
+
+		/*
 		**	If this unit has officially joined the team's group, then this flag is
 		**	true. A newly assigned unit to a team is not considered part of the
 		**	team until it actually reaches the location where the team is. By

@@ -838,6 +838,15 @@ void EventClass::Execute(void)
 				if (techno->Is_Foot()) {
 					((FootClass *)techno)->Clear_Navigation_List();
 				}
+				/*
+				** Kerekupai: CFE PATCH REDUX MOD RALLY POINT
+				*/
+				if (CFE_Patch_Can_Have_Rally_Point(*techno)) {
+					techno->Assign_Target(TARGET_NONE);
+				}
+				/*
+				** Kerekupai: end CFE PATCH REDUX MOD RALLY POINT
+				*/
 			}
 			break;
 
@@ -1059,6 +1068,28 @@ void EventClass::Execute(void)
 			Sound_Effect( VOC_INCOMING_MESSAGE );
 			break;
 #endif
+		/*
+		** Kerekupai: CFE PATCH REDUX MOD RALLY POINT
+		*/
+		//CFE Patch events
+		case SET_RALLY:
+			if (BuildingClass* const building = Data.NavCom.Whom.As_Building())
+			{
+				TARGET newTarget = Data.NavCom.Where.As_Target();
+				if (building->RallyPoint != newTarget)
+				{
+					if (building->As_Target() != newTarget)
+						building->RallyPoint = newTarget;
+					else
+						building->RallyPoint = TARGET_NONE;
+
+					Map.Flag_To_Redraw(true);
+				}
+			}
+			break;
+		/*
+		** Kerekupai: end CFE PATCH REDUX MOD RALLY POINT
+		*/
 
 		/*
 		**	Default: do nothing.

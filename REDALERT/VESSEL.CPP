@@ -309,6 +309,15 @@ MoveType VesselClass::Can_Enter_Cell(CELL cell, FacingType ) const
 		if (cellptr->Flag.Occupy.Vehicle) {
 			retval = MOVE_MOVING_BLOCK;
 		}
+
+		/*
+		** Kerekupai: AI vessels are ghost to allies
+		*/
+		if(retval == MOVE_MOVING_BLOCK && !House->IsHuman && House->Is_Ally(cellptr->Cell_Vessel()))
+			retval = MOVE_OK;
+		/*
+		** Kerekupai: end of AI vessels are ghost to allies
+		*/
 	}
 
 	/*
@@ -1298,9 +1307,16 @@ TARGET VesselClass::Greatest_Threat(ThreatType threat) const
 
 		// Cruisers can never hit infantry anyway, so take 'em out of the list
 		// of possible targets.
-		if (*this == VESSEL_CA) {
+		/*
+		** Kerekupai: cruiser can target infantry in skirmish only
+		*/
+		//if (*this == VESSEL_CA) {
+		if (*this == VESSEL_CA && (House->IsHuman || Session.Type == GAME_NORMAL)) {
 			threat = (ThreatType) (threat & (~THREAT_INFANTRY));
 		}
+		/*
+		** Kerekupai: end of cruiser can target infantry in skirmish only
+		*/
 	}
 #ifdef FIXIT_CARRIER	//	checked - ajw 9/28/98
 	if (*this == VESSEL_CARRIER) {

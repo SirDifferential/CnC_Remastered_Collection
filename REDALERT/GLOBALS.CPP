@@ -173,7 +173,7 @@ int QuakeDelay;
 fixed ChronoTankDuration=0x300;	// chrono override for chrono tanks
 #ifdef FIXIT_ENGINEER	//	checked - ajw 9/28/98
 fixed EngineerDamage=0x55;			// Amount of damage an engineer does
-fixed EngineerCaptureLevel=0x40;	// Building damage level before engineer can capture
+fixed EngineerCaptureLevel = 0x40;	// Building damage level before engineer can capture
 #endif
 #endif
 

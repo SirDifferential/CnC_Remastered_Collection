@@ -88,6 +88,11 @@ class UnitClass :	public DriveClass
 		int Tiberium;
 
 		/*
+		** Kerekupai: delay to speaking silos needed
+		*/ 
+		bool can_speak_silos_needed;
+
+		/*
 		** This is the area where a mobile gap generator stores the previously-held
 		** shroud values for the cells surrounding itself.
 		*/
@@ -247,6 +252,14 @@ class UnitClass :	public DriveClass
 		virtual void Per_Cell_Process(PCPType why);
 		void Exit_Repair(void);
 		void Shroud_Regen(void);
+
+		// Kerekupai: #MinorAIFixes - Unsticking Harvesters
+		virtual void Unstick_Harvesters(void);
+		CELL LastHarvesterCell = 0;
+		virtual CELL Reverse_Cell(DirType, CELL);
+		/*
+		** Kerekupai: end of #MinorAIFixes - Unsticking Harvesters
+		*/
 
 		/*
 		**	File I/O.

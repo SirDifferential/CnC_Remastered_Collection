@@ -140,6 +140,11 @@
 */
 #include "SidebarGlyphx.h"
 
+/*
+** pchote - "Modern Wall Building" mod.
+*/
+extern bool DLL_Export_Get_Input_Key_State(KeyNumType key);
+
 TFixedIHeapClass<HouseClass::BuildChoiceClass> HouseClass::BuildChoice;
 
 int TFixedIHeapClass<HouseClass::BuildChoiceClass>::Save(Pipe &) const
@@ -682,6 +687,16 @@ HouseClass::HouseClass(HousesType house) :
 	Attack = Rule.AttackDelay * Random_Pick(TICKS_PER_MINUTE/2, TICKS_PER_MINUTE*2);
 
 	Init_Unit_Trackers();
+
+	/*
+	** Kerekupai: gaming with friends variable initialization
+	*/
+	n_human_players = -1;
+	set_gaming_with_friends(false);
+	/*
+	** Kerekupai: end of gaming with friends variable initialization
+	*/
+
 }
 
 
@@ -1087,7 +1102,7 @@ void HouseClass::AI(void)
 		if (SpeakMaxedDelay == 0 && IsMaxedOut) {
 			IsMaxedOut = false;
 			if ((Capacity - Tiberium) < 300 && Capacity > 500 && (ActiveBScan & (STRUCTF_REFINERY | STRUCTF_CONST))) {
- 				Speak(VOX_NEED_MO_CAPACITY);
+ 				//Speak(VOX_NEED_MO_CAPACITY); // Kerekupai: silo needed commented out
 				SpeakMaxedDelay = Options.Normalize_Delay(TICKS_PER_MINUTE * Rule.SpeakDelay);
 			}
 		}
@@ -1149,9 +1164,13 @@ void HouseClass::AI(void)
 	**	Process any super weapon logic required.
 	*/
 
-	if (Session.Type != GAME_GLYPHX_MULTIPLAYER || !MPSuperWeaponDisable) {
+	/*
+	** Kerekupai: disabling superweapons only affects nuclearbomb, iron curtain, gps and chronosphere
+	*/
+
+	//if (Session.Type != GAME_GLYPHX_MULTIPLAYER || !MPSuperWeaponDisable) {
 		Super_Weapon_Handler();
-	}
+	//}
 
 #ifdef FIXIT_VERSION_3			//	For endgame auto-sonar pulse.
 	if( (Session.Type != GAME_NORMAL || !IsHuman) && Scen.AutoSonarTimer == 0 )
@@ -1314,11 +1333,25 @@ void HouseClass::AI(void)
 		Do_All_To_Hunt();
 	}
 
+	/*
+	** Kerekupai: if this is the end of a Skirmish match
+	**			  AI uncloaks everything
+	*/ 
+	if (Session.Type != GAME_NORMAL && State == STATE_ENDGAME && !IsHuman  && Buildings.Count() < 1)
+	{
+		Do_Uncloak_All();
+	}
+
 	AI_Building();
 	AI_Unit();
 	AI_Vessel();
 	AI_Infantry();
 	AI_Aircraft();
+	/*
+	** Kerekupai from #MinorAIFixes - call the Harvester unsticking code
+	*/ 	
+	if(!IsHuman)
+		AI_Harvesters();
 
 
 	/*
@@ -1358,7 +1391,259 @@ void HouseClass::AI(void)
 		IsToLook = false;
 		Map.All_To_Look(PlayerPtr);
 	}
+
+	/*
+	** Kerekupai: sell structures to get money if there is no other way to get cash
+	*/ 
+	if (Session.Type != GAME_NORMAL &&
+		!IsHuman &&
+		Available_Money() < 15 && // insuficient funds
+		Frame % 100 == 0
+		)
+	{
+		// check if there are active harvesters
+		int harvester_count = 0;
+		for (int index = 0; index < Units.Count(); index++) {
+			UnitClass * u = Units.Ptr(index);
+			if (u != NULL && *u == UNIT_HARVESTER && u->House == this && !u->IsInLimbo) {
+				harvester_count++;
+			}
+		}
+
+		bool sold = false;
+		if(BQuantity[STRUCT_REFINERY] < 1 || harvester_count < 1)
+		{
+			sold = Sell_Some_Structures();
+		}
+	}
+
+	/*
+	bool sold = false;
+	if (Session.Type != GAME_NORMAL &&
+		!IsHuman &&
+		Available_Money() < 5 && // insuficient funds
+		Frame % 100 == 0 &&
+		(BQuantity[STRUCT_REFINERY] < 1 || harvester_count < 1)
+		)
+	{
+		sold = Sell_Some_Structures();
+	}
+	*/
+	/*
+	** Kerekupai: end of sell structures to get money if there is no other way to get cash
+	*/
+
 }
+
+
+/***********************************************************************************************
+ * HouseClass::Do_Uncloak_All -- AI cloaked units and structures are uncloaked					   *
+ *                                                                                             *
+ *                                                                                             *
+ * INPUT:   none                                                                               *
+ *                                                                                             *
+ * OUTPUT:  boolean true if cloaked units / structures were found							   *
+ *                                                                                             *
+ * WARNINGS:   none                                                                            *
+ *                                                                                             *
+ * HISTORY:                                                                                    *
+ *   07/02/2022 Kerekupai : Created.                                                           *
+ *=============================================================================================*/
+bool HouseClass::Do_Uncloak_All()
+{
+	bool something_cloaked = false;
+
+	// Vessels
+	for (int index = 0; index < Vessels.Count(); index++) {
+		VesselClass * v = Vessels.Ptr(index);
+		if (v != NULL && v->Cloak == CLOAKED) {
+			v->Do_Uncloak();
+			something_cloaked = true;
+		}
+	}
+	// infantry
+	for (int index = 0; index < Infantry.Count(); index++) {
+		InfantryClass * i = Infantry.Ptr(index);
+		if (i != NULL && i->Cloak == CLOAKED) {
+			i->Do_Uncloak();
+			something_cloaked = true;
+		}
+	}
+	// Unit
+	for (int index = 0; index < Units.Count(); index++) {
+		UnitClass * u = Units.Ptr(index);
+		if (u != NULL && u->Cloak == CLOAKED) {
+			u->Do_Uncloak();
+			something_cloaked = true;
+		}
+	}
+	// Buildings
+	for (int index = 0; index < Buildings.Count(); index++) {
+		BuildingClass * b = Buildings.Ptr(index);
+		if (b != NULL && b->Cloak == CLOAKED) {
+			b->Do_Uncloak();
+			something_cloaked = true;
+		}
+	}
+	// We skip aircraft
+	return something_cloaked;
+}
+
+
+/***********************************************************************************************
+ * HouseClass::Sell_Some_Structures -- AI Sell structures when no harverster is available      *
+ *                                                                                             *
+ *                                                                                             *
+ * INPUT:   none                                                                               *
+ *                                                                                             *
+ * OUTPUT:  boolean true if a structure was sold. Otherwise false							   *
+ *                                                                                             *
+ * WARNINGS:   none                                                                            *
+ *                                                                                             *
+ * HISTORY:                                                                                    *
+ *   11/12/2020 Kerekupai : Created.                                                           *
+ *=============================================================================================*/
+
+bool HouseClass::Sell_Some_Structures()
+{
+	BuildingClass * b = Find_Building(STRUCT_REPAIR);
+	if (b != NULL && b->House == this)
+	{
+		b->Sell_Back(1);
+		return true;
+	}
+	
+	b = Find_Building(STRUCT_GAP);
+	if (b != NULL && b->House == this)
+	{
+		b->Sell_Back(1);
+		return true;
+	}
+
+	b = Find_Building(STRUCT_ADVANCED_TECH);
+	if (b != NULL && b->House == this)
+	{
+		b->Sell_Back(1);
+		return true;
+	}
+
+	b = Find_Building(STRUCT_CHRONOSPHERE);
+	if (b != NULL && b->House == this)
+	{
+		b->Sell_Back(1);
+		return true;
+	}
+
+	b = Find_Building(STRUCT_SOVIET_TECH);
+	if (b != NULL && b->House == this)
+	{
+		b->Sell_Back(1);
+		return true;
+	}
+
+	if (BQuantity[STRUCT_AIRSTRIP] > 2 || BQuantity[STRUCT_WEAP] > 2)
+	{
+		b = Find_Building(STRUCT_AIRSTRIP);
+		if (b == NULL) {
+			b = Find_Building(STRUCT_WEAP);
+		}
+		if (b->House == this)
+		{
+			b->Sell_Back(1);
+			return true;
+		}
+	}
+
+	if (BQuantity[STRUCT_HELIPAD] > 2)
+	{
+		b = Find_Building(STRUCT_HELIPAD);
+		if (b != NULL && b->House == this)
+		{
+			b->Sell_Back(1);
+			return true;
+		}
+	}
+
+	if (BQuantity[STRUCT_STORAGE] > 0)
+	{
+		b = Find_Building(STRUCT_STORAGE);
+		if (b != NULL && b->House == this)
+		{
+			b->Sell_Back(1);
+			return true;
+		}
+	}
+
+	b = Find_Building(STRUCT_SUB_PEN);
+	if (b != NULL && b->House == this)
+	{
+		b->Sell_Back(1);
+		return true;
+	}
+
+	b = Find_Building(STRUCT_SHIP_YARD);
+	if (b != NULL && b->House == this)
+	{
+		b->Sell_Back(1);
+		return true;
+	}
+
+	if (BQuantity[STRUCT_REFINERY] > 1)
+	{
+		b = Find_Building(STRUCT_REFINERY);
+		if (b != NULL && b->House == this)
+		{
+			b->Sell_Back(1);
+			return true;
+		}
+	}
+
+	if (BQuantity[STRUCT_TESLA] > 2 || BQuantity[STRUCT_TURRET] > 3)
+	{
+		b = Find_Building(STRUCT_TESLA);
+		if (b == NULL) {
+			b = Find_Building(STRUCT_TURRET);
+		}
+		if (b != NULL && b->House == this)
+		{
+			b->Sell_Back(1);
+			return true;
+		}
+	}
+
+	if (BQuantity[STRUCT_AAGUN] > 2 || BQuantity[STRUCT_SAM] > 2)
+	{
+		b = Find_Building(STRUCT_AAGUN);
+		if (b == NULL) {
+			b = Find_Building(STRUCT_SAM);
+		}
+		if (b != NULL && b->House == this)
+		{
+			b->Sell_Back(1);
+			return true;
+		}
+	}
+
+	if (BQuantity[STRUCT_FLAME_TURRET] > 3 || (BQuantity[STRUCT_PILLBOX] + BQuantity[STRUCT_CAMOPILLBOX]) > 3)
+	{
+		b = Find_Building(STRUCT_FLAME_TURRET);
+		if (b == NULL) {
+			b = Find_Building(STRUCT_PILLBOX);
+		}
+		if (b == NULL) {
+			b = Find_Building(STRUCT_CAMOPILLBOX);
+		}
+		if (b != NULL && b->House == this)
+		{
+			b->Sell_Back(1);
+			return true;
+		}
+	}
+
+
+	return false;
+}
+
 
 /***********************************************************************************************
  * HouseClass::Super_Weapon_Handler -- Handles the super weapon charge and discharge logic.    *
@@ -1377,6 +1662,12 @@ void HouseClass::AI(void)
  *=============================================================================================*/
 void HouseClass::Super_Weapon_Handler(void)
 {
+
+	/*
+	** Kerekupai: superweapons include nuke, chrono, gps, iron curtain
+	**			  search for MPSuperWeaponDisable inside this function
+	*/
+
 	/*
 	**	Perform all super weapon AI processing. This just checks to see if
 	**	the graphic needs changing for the special weapon and updates the
@@ -1410,7 +1701,8 @@ void HouseClass::Super_Weapon_Handler(void)
 	** Check to see if they have launched the GPS, but subsequently lost their
 	** tech center.  If so, remove the GPS, and shroud the map.
 	*/
-	if (IsGPSActive && !(ActiveBScan & STRUCTF_ADVANCED_TECH) ) {
+	
+	if (/*!MPSuperWeaponDisable &&*/ IsGPSActive && !(ActiveBScan & STRUCTF_ADVANCED_TECH) ) {
 		IsGPSActive = false;
 
 		/*
@@ -1435,7 +1727,7 @@ void HouseClass::Super_Weapon_Handler(void)
 	**	being destroyed is a good example of this.  Having fired the satellite
 	** is another good example, because it's a one-shot item.
 	*/
-	if (SuperWeapon[SPC_GPS].Is_Present()) {
+	if (/*!MPSuperWeaponDisable &&*/ SuperWeapon[SPC_GPS].Is_Present()) {
 		if (!(ActiveBScan & STRUCTF_ADVANCED_TECH) || IsGPSActive || IsDefeated) {
 			/*
 			**	Remove the missile capability when there is no advanced tech facility.
@@ -1464,7 +1756,7 @@ void HouseClass::Super_Weapon_Handler(void)
 				}
 			}
 		}
-	} else {
+	} else {//if (!MPSuperWeaponDisable){
 		/*
 		**	If there is no GPS satellite present, but there is a GPS satellite
 		**	facility available, then make the GPS satellite available as well.
@@ -1511,7 +1803,7 @@ void HouseClass::Super_Weapon_Handler(void)
 	**	because of outside circumstances. The chronosphere facility
 	**	being destroyed is a good example of this.
 	*/
-	if (SuperWeapon[SPC_CHRONOSPHERE].Is_Present()) {
+	if (/*!MPSuperWeaponDisable &&*/ SuperWeapon[SPC_CHRONOSPHERE].Is_Present()) {
 		if ( (!(ActiveBScan & STRUCTF_CHRONOSPHERE) && !SuperWeapon[SPC_CHRONOSPHERE].Is_One_Time()) || IsDefeated) {
 
 			/*
@@ -1543,7 +1835,7 @@ void HouseClass::Super_Weapon_Handler(void)
 				IsRecalcNeeded = true;
 			}
 		}
-	} else {
+	} else {// if (!MPSuperWeaponDisable){
 		/*
 		**	If there is no chronosphere present, but there is a chronosphere
 		**	facility available, then make the chronosphere available as well.
@@ -1578,7 +1870,7 @@ void HouseClass::Super_Weapon_Handler(void)
 	**	because of outside circumstances. The iron curtain facility
 	**	being destroyed is a good example of this.
 	*/
-	if (SuperWeapon[SPC_IRON_CURTAIN].Is_Present()) {
+	if (/*!MPSuperWeaponDisable &&*/ SuperWeapon[SPC_IRON_CURTAIN].Is_Present()) {
 		if ( (!(ActiveBScan & STRUCTF_IRON_CURTAIN) && !SuperWeapon[SPC_IRON_CURTAIN].Is_One_Time())  || IsDefeated) {
 
 			/*
@@ -1595,7 +1887,7 @@ void HouseClass::Super_Weapon_Handler(void)
 				IsRecalcNeeded = true;
 			}
 		}
-	} else {
+	} else {//if (!MPSuperWeaponDisable){
 		/*
 		**	If there is no iron curtain present, but there is an iron curtain
 		**	facility available, then make the iron curtain available as well.
@@ -1657,7 +1949,7 @@ void HouseClass::Super_Weapon_Handler(void)
 	**	because of outside circumstances. The missile silos
 	**	being destroyed is a good example of this.
 	*/
-	if (SuperWeapon[SPC_NUCLEAR_BOMB].Is_Present()) {
+	if (!MPSuperWeaponDisable && SuperWeapon[SPC_NUCLEAR_BOMB].Is_Present()) {
 		if ( (!(ActiveBScan & STRUCTF_MSLO) && !SuperWeapon[SPC_NUCLEAR_BOMB].Is_One_Time()) || IsDefeated) {
 
 			/*
@@ -1683,7 +1975,7 @@ void HouseClass::Super_Weapon_Handler(void)
 			}
 		}
 
-	} else {
+	} else if(!MPSuperWeaponDisable) {
 		/*
 		**	If there is no nuclear missile present, but there is a missile
 		**	silo available, then make the missile available as well.
@@ -1871,12 +2163,25 @@ void HouseClass::Harvested(unsigned tiberium)
 
 	long oldtib = Tiberium;
 
-	Tiberium += tiberium;
+	/*
+	** Kerekupai: AI get x2 more ore
+	*/ 
+	int f = 1;
+	if (Session.Type != GAME_NORMAL && !IsHuman)
+	{
+		f = 2; // previous 2
+	}
+	//Tiberium += tiberium; // original code
+	Tiberium += tiberium * f;
 	if (Tiberium > Capacity) {
 		Tiberium = Capacity;
 		IsMaxedOut = true;
 	}
-	HarvestedCredits += tiberium;
+	//HarvestedCredits += tiberium; // original code
+	HarvestedCredits += tiberium * f;
+	/*
+	** Kerekupai: end of AI get x2 more ore
+	*/
 	Silo_Redraw_Check(oldtib, Capacity);
 }
 
@@ -2674,6 +2979,40 @@ void HouseClass::Special_Weapon_AI(SpecialWeaponType id)
 		}
 	}
 
+	/*
+	** Kerekupai: if gametoplay != game_normal -> AI selects a random enemy building with
+	**			  value >= that of the power plant (300)
+	*/
+	int const N = 100;
+	int list[N];
+	int n = 0;
+
+	if(Session.Type != GAME_NORMAL && Percent_Chance(50)) {
+		n = 0;
+		best = 299; //  power plant cost 300
+
+		for (int index = 0; index < Buildings.Count(); index++) {
+			BuildingClass * b = Buildings.Ptr(index);
+
+			if (b != NULL && !b->IsInLimbo && b->Strength && !Is_Ally(b)) {
+				if (b->Class->Cost_Of() > best && n < N) {
+					list[n] = index; // store the index value of the building
+						n++;			 // update counter
+				}
+			}
+		}
+		// Randomly select a potential target
+		if (n > 0 && n <= N)
+		{
+			bestptr = Buildings.Ptr(list[(rand() % n)]);
+		}
+	}
+	/*
+	** Kerekupai: end of if gametoplay != game_normal -> AI selects a random enemy building with
+	**			  value >= that of the power plant (300)
+	*/
+	
+
 	if (bestptr) {
 		CELL cell = Coord_Cell(bestptr->Center_Coord());
 		Place_Special_Blast(id, cell);
@@ -2804,11 +3143,13 @@ bool HouseClass::Place_Special_Blast(SpecialWeaponType id, CELL cell)
 						ttype->MissionCount = 1;
 						ttype->MissionList[0].Mission = TMISSION_ATT_WAYPT;
 						ttype->MissionList[0].Data.Value = WAYPT_SPECIAL;
-						ttype->ClassCount = 2;
-						ttype->Members[0].Quantity = AircraftTypeClass::As_Reference(AIRCRAFT_BADGER).Max_Passengers();
+						ttype->ClassCount = 3; // Kerekupai: add one rocket launcher infantry unit to the team (def 2)
+						ttype->Members[0].Quantity = AircraftTypeClass::As_Reference(AIRCRAFT_BADGER).Max_Passengers() - 1; // Kerekupai: substract one to make room for another type
 						ttype->Members[0].Class = &InfantryTypeClass::As_Reference(INFANTRY_E1);
-						ttype->Members[1].Quantity = 1;
-						ttype->Members[1].Class = &AircraftTypeClass::As_Reference(AIRCRAFT_BADGER);
+						ttype->Members[1].Quantity = 1; // Kerekupai: substract one to make room for another type
+						ttype->Members[1].Class = &InfantryTypeClass::As_Reference(INFANTRY_E3); // rocket launcher inf unit
+						ttype->Members[2].Quantity = 1; // Kerekupai: def [1]
+						ttype->Members[2].Class = &AircraftTypeClass::As_Reference(AIRCRAFT_BADGER); // Kerekupai: def [1]
 					}
 				}
 
@@ -3184,9 +3525,33 @@ bool HouseClass::Place_Object(RTTIType type, CELL cell)
 				if (builder) {
 
 					builder->Transmit_Message(RADIO_HELLO, tech);
+
+					/*
+					** If tech is a wall it will be replaced with an overlay and freed by Unlimbo.
+					** We must fetch the overlay type now, while we still can.
+					** pchote - "Modern Wall Building" mod.
+					*/
+					OverlayType otype = OVERLAY_NONE;
+					HousesType house = tech->House->Class->House;
+					if (tech->What_Am_I() == RTTI_BUILDING)
+						otype = ((BuildingClass*)tech)->Class->Overlay_Type();
+
 					if (tech->Unlimbo(Cell_Coord(cell))) {
 						factory->Completed();
 						Abandon_Production(type);
+
+						/*
+						** Add the line-built wall segments to the map.
+						** pchote - "Modern Wall Building" mod.
+						*/
+						bool ctrldown = DLL_Export_Get_Input_Key_State(KN_LCTRL);
+						if (otype != OVERLAY_NONE && !ctrldown)
+						{
+							OverlayTypeClass const & wall = OverlayTypeClass::As_Reference(otype);
+							DirType cardinal[4] = { DIR_N, DIR_E, DIR_S, DIR_W };
+							for (int i = 0; i < 4; i++)
+								Extend_Wall(wall, house, cell, cardinal[i], 5);
+						}
 
 						if (PlayerPtr == this) {
 							Sound_Effect(VOC_PLACE_BUILDING_DOWN);
@@ -3214,6 +3579,67 @@ bool HouseClass::Place_Object(RTTIType type, CELL cell)
 	}
 
 	return(true);
+}
+
+
+/***********************************************************************************************
+ * HouseClass::Extend_Wall -- Attempt to extend a line-built wall                              *
+ *                                                                                             *
+ *    This routine implements the wall placement behaviour from OpenRA.                        *
+ *    Step outwards in a specified direction up to a specified number of cells.                *
+ *    If we encounter an overlay of the specified wall type, break and create wall overlay     *
+ *    in the intermediate cells. If a matching wall is not found, or we encounter an           *
+ *    obstacle, return without doing anything.                                                 *
+ *                                                                                             *
+ * INPUT:   wall     -- The overlay type that is being placed down on the map.                 *
+ *                                                                                             *
+ *          house    -- The owner for newly placed wall segments                               *
+ *                                                                                             *
+ *          cell     -- The reference cell to check next to                                    *
+ *                                                                                             *
+ *          dir      -- The direction to step from the reference cell                          *
+ *                                                                                             *
+ *          step     -- The maximum number of steps to check for a connecting wall             *
+ *                                                                                             *
+ * OUTPUT:  Was the wall successfully extended?                                                *
+ *                                                                                             *
+ *                                                                                             *
+ * HISTORY:                                                                                    *
+ *   04/29/2020 pchote : Created for the "Modern Wall Building" mod.                           *
+ *=============================================================================================*/
+bool HouseClass::Extend_Wall(OverlayTypeClass const& wall, HousesType house, CELL cell, DirType dir, int step)
+{
+	// Step in the requested direction and abort if it is outside the map
+	CELL adjacent = Adjacent_Cell(cell, dir);
+	if (!Map.In_Radar(adjacent))
+		return false;
+
+	// Check whether the cell contains a connectable wall
+	OverlayType overlay = Map[adjacent].Overlay;
+	if (overlay == wall.Type)
+		return true;
+
+	// Cell is blocked by something else
+	if (!Map[adjacent].Is_Clear_To_Build())
+		return false;
+
+	// Cell does not contain a connectable wall. Does the next?
+	if (step > 1 && Extend_Wall(wall, house, adjacent, dir, step - 1))
+	{
+		// The next cell does indeed have a wall
+		// Place our new connector and tell the caller that there is now a new connectable wall
+		if (wall.Create_And_Place(adjacent, house))
+		{
+			// Set the owner so players can sell line-built walls
+			// For some reason Create_And_Place does not do this for us
+			Map[adjacent].Owner = house;
+			return true;
+		}
+
+		return true;
+	}
+
+	return false;
 }
 
 
@@ -4452,7 +4878,11 @@ void HouseClass::Sell_Wall(CELL cell)
 						Sound_Effect(VOC_CASHTURN);
 					}
 
-					Refund_Money(btype->Raw_Cost() * Rule.RefundPercent);
+					/*
+					** Disable refunds on walls to prevent cash exploits from line-built (free) walls.
+					** pchote - "Modern Wall Building" mod.
+					*/
+					// Refund_Money(btype->Raw_Cost() * Rule.RefundPercent);
 					Map[cell].Overlay = OVERLAY_NONE;
 					Map[cell].OverlayData = 0;
 					Map[cell].Owner = HOUSE_NONE;
@@ -4953,21 +5383,44 @@ int HouseClass::Expert_AI(void)
 			maxaircraft /= enemycount;
 		}
 
-		if (Control.MaxBuilding < (unsigned)maxbuilding + 10) {
-			Control.MaxBuilding = maxbuilding + 10;
+		/*
+		** Kerekupai: scale up building, unit, infantry limit
+		**			  original default value = 10
+		*/
+		unsigned int extra_buildings = 10;
+		unsigned int extra_infantry = 10;
+		unsigned int extra_units = 10;
+		unsigned int extra_vessels = 10;
+		unsigned int extra_aircraft = 10;
+
+		if (Session.Type == GAME_NORMAL)
+		{
+			extra_buildings *= 2;
+			extra_infantry *= 4;
+			extra_units *= 3;
+			extra_vessels *= 2;
+			extra_aircraft *= 2;
 		}
-		if (Control.MaxUnit < (unsigned)maxunit + 10) {
-			Control.MaxUnit = maxunit + 10;
+
+		if (Control.MaxBuilding < (unsigned)maxbuilding + extra_buildings) {
+			Control.MaxBuilding = maxbuilding + extra_buildings;
 		}
-		if (Control.MaxInfantry < (unsigned)maxinfantry + 10) {
-			Control.MaxInfantry = maxinfantry + 10;
+		if (Control.MaxUnit < (unsigned)maxunit + extra_units) {
+			Control.MaxUnit = maxunit + extra_units;
 		}
-		if (Control.MaxVessel < (unsigned)maxvessel + 10) {
-			Control.MaxVessel = maxvessel + 10;
+		if (Control.MaxInfantry < (unsigned)maxinfantry + extra_infantry) {
+			Control.MaxInfantry = maxinfantry + extra_infantry;
 		}
-		if (Control.MaxAircraft < (unsigned)maxaircraft + 10) {
-			Control.MaxAircraft = maxaircraft + 10;
+		if (Control.MaxVessel < (unsigned)maxvessel + extra_vessels) {
+			Control.MaxVessel = maxvessel + extra_vessels;
 		}
+		if (Control.MaxAircraft < (unsigned)maxaircraft + extra_aircraft) {
+			Control.MaxAircraft = maxaircraft + extra_aircraft;
+		}
+		/*
+		** Kerekupai: end of scale up building, unit, infantry limit
+		**			  original default value = 10
+		*/
 	}
 
 	/*
@@ -5185,6 +5638,16 @@ UrgencyType HouseClass::Check_Attack(void) const
 		}
 		return(URGENCY_CRITICAL);
 	}
+
+	/*
+	** Kerekupai: if density is high and not under attack then go attacking
+	*/
+	if (IsBaseBuilding && State != STATE_ATTACKED && CurInfantry + CurUnits > 50 && Percent_Chance(10))
+		return(URGENCY_CRITICAL);
+	/*
+	** Kerekupai: end of if density is high and not under attack then go attacking
+	*/
+
 	return(URGENCY_NONE);
 }
 
@@ -5295,21 +5758,129 @@ bool HouseClass::AI_Attack(UrgencyType )
 	bool shuffle = !((Frame > TICKS_PER_MINUTE && !CurBuildings) || Percent_Chance(33));
 	bool forced = (CurBuildings == 0);
 	int index;
+	/*
+	** Kerekupai: define variables used for engineer, spy, thief tasks
+	*/ 
+	int const N = 100;
+	int list[N];
+	int n = 0;
+	/*
+	** Kerekupai: end of define variables used for engineer, spy, thief tasks
+	*/
+
 	for (index = 0; index < Aircraft.Count(); index++) {
 		AircraftClass * a = Aircraft.Ptr(index);
 
 		if (a != NULL && !a->IsInLimbo && a->House == this && a->Strength > 0) {
-			if (!shuffle && a->Is_Weapon_Equipped() && (forced || Percent_Chance(75))) {
+			if (!shuffle && (a->Is_Weapon_Equipped()) && (forced || Percent_Chance(75))) {
 				a->Assign_Mission(MISSION_HUNT);
 			}
+			/*
+			** Kerekupai: Transport helis resting on ground at base guard area
+			**			  If they have cargo, send them hunting
+			*/
+			if (*a == AIRCRAFT_TRANSPORT && a->Height == 0 && Which_Zone(a) != ZONE_NONE) {
+				//a->Assign_Mission(MISSION_GUARD_AREA); // moved to ::AI() Aircraft.cpp
+				if (a->Is_Something_Attached() && a->Class->Max_Passengers() - a->How_Many() == 0) {
+					a->Assign_Mission(MISSION_HUNT);
+				}
+			}
+			/*
+			** Kerekupai: end of Transport helis resting on ground at base guard area
+			*/
+			
 		}
 	}
+	/*
+	** Kerekupai: AI sends vessels hunting
+	**			  only intended for Skirmish
+	*/ 
+	if (Session.Type != GAME_NORMAL)
+	{
+		for (index = 0; index < Vessels.Count(); index++) {
+			VesselClass * v = Vessels.Ptr(index);
+
+			if (v != NULL && !v->IsInLimbo && v->House == this && v->Strength > 0) {
+				if (!shuffle && v->Is_Weapon_Equipped() && (forced || Percent_Chance(70))) {
+					v->Assign_Mission(MISSION_HUNT);
+					/*
+					** Kerekupai: set archive target to none to prevent vessels coming back to base from the assault
+					*/
+					v->ArchiveTarget = TARGET_NONE;
+					/*
+					** Kerekupai: end of set archive target to none to prevent vessels coming back to base from the assault
+					*/
+				}
+				else {
+
+					if (Percent_Chance(20) && v->Mission == MISSION_GUARD_AREA && Which_Zone(v) != ZONE_NONE) {
+						v->ArchiveTarget = ::As_Target(Where_To_Go(v));
+					}
+					// vessels guard area if around base, otherwise hunt
+					if (Which_Zone(v) != ZONE_NONE)
+					{
+						v->Scatter(0, true);
+						v->Assign_Mission(MISSION_GUARD_AREA);
+					}
+					else {
+						v->Assign_Mission(MISSION_HUNT);
+					}
+					
+				}
+			}
+
+		}
+	}
+	/*
+	** Kerekupai: end of AI sends vessels hunting
+	*/
 	for (index = 0; index < Units.Count(); index++) {
 		UnitClass * u = Units.Ptr(index);
 
 		if (u != NULL && !u->IsInLimbo && u->House == this && u->Strength > 0) {
-			if (!shuffle && u->Is_Weapon_Equipped() && (forced || Percent_Chance(75))) {
+			/*
+			** Kerekupai: make convoy trucks go hunting if they are carrying infantry
+			*/ 
+			//if (!shuffle && u->Is_Weapon_Equipped() && (forced || Percent_Chance(75))) {
+			if (!shuffle && (u->Is_Weapon_Equipped() || 
+				(((*u == UNIT_TRUCK && u->Is_Something_Attached()) || *u == UNIT_MAD) && Session.Type != GAME_NORMAL)
+				) && 
+				(forced || Percent_Chance(70))) {
+				/*
+				** Kerekupai: set archive target to none to prevent units coming back to base from the assault
+				*/
+				u->ArchiveTarget = TARGET_NONE;
+				/*
+				** Kerekupai: end of set archive target to none to prevent units coming back to base from the assault
+				*/
 				u->Assign_Mission(MISSION_HUNT);
+
+				/*
+				** Kerekupai: handle truck AI
+				**			  truck randomly selects which enemy building to approach
+				*/ 
+				if (*u == UNIT_TRUCK) {
+					n = 0;
+					for (int index = 0; index < Buildings.Count(); index++) {
+						BuildingClass * b = Buildings.Ptr(index);
+
+						if (b != NULL && !b->IsInLimbo &&
+							b->Strength > 0 && (*b == STRUCT_TENT || *b == STRUCT_BARRACKS || *b == STRUCT_CONST) && 
+							this != b->House && !Is_Ally(b->House) &&
+							n < N) {
+							list[n] = index; // store the index value of the building
+							n++;			 // update counter
+						}
+					}
+					// Randomly select among the structures
+					if (n > 0 && n <= N)
+					{
+						u->Assign_Destination(Buildings.Ptr(list[(rand() % n)])->As_Target());
+					}
+				}
+				/*
+				** Kerekupai: end of handle truck AI
+				*/
 			} else {
 
 				/*
@@ -5320,15 +5891,161 @@ bool HouseClass::AI_Attack(UrgencyType )
 					u->ArchiveTarget = ::As_Target(Where_To_Go(u));
 				}
 			}
+			/*
+			** Kerekupai: if the unit is far away from home, then send it hunting
+			**			  this may affect those units discovered from crates
+			*/
+			if (u->Is_Weapon_Equipped() && u->Mission != MISSION_HUNT) {
+				if (Distance(u->Coord, Center) >= 5 * Radius) {
+					u->Assign_Mission(MISSION_HUNT);
+				}
+				if (Which_Zone(u) == ZONE_NONE && Distance(u->Coord, Center) < 5 * Radius) {
+					u->Assign_Mission(MISSION_GUARD_AREA);
+					u->ArchiveTarget = ::As_Target(Where_To_Go(u));
+				}
+			}
+			/*
+			** Kerekupai: end of if the unit is far away from home, then send it hunting
+			*/
+
+			/*
+			** Kerekupai: AI tries to expand its base into new territory
+			**			  Minelayer place mines on ore fields
+			*/
+			if ((*u == UNIT_MCV || *u == UNIT_MINELAYER) && Percent_Chance(50))
+			{
+				u->Goto_Tiberium(Rule.TiberiumLongScan / CELL_LEPTON_W);
+				u->Assign_Mission(MISSION_MOVE);
+			}
+			if (*u == UNIT_MCV && Map[u->Coord].Land_Type() == LAND_TIBERIUM)
+			{
+				u->Assign_Mission(MISSION_HUNT);
+			}
+			if (*u == UNIT_MINELAYER && Map[u->Coord].Land_Type() == LAND_TIBERIUM)
+			{
+				u->Assign_Mission(MISSION_UNLOAD);
+			}
+			/*
+			** Kerekupai: end of AI tries to expand its base into new territory
+			*/
 		}
 	}
 	for (index = 0; index < Infantry.Count(); index++) {
 		InfantryClass * i = Infantry.Ptr(index);
 
 		if (i != NULL && !i->IsInLimbo && i->House == this && i->Strength > 0) {
-			if (!shuffle && (i->Is_Weapon_Equipped() || *i == INFANTRY_RENOVATOR) && (forced || Percent_Chance(75))) {
+
+			if (!shuffle && (i->Is_Weapon_Equipped() || 
+				(Session.Type != GAME_NORMAL && (*i == INFANTRY_RENOVATOR || *i == INFANTRY_SPY || *i == INFANTRY_THIEF))) && 
+				(forced || Percent_Chance(70))) {
+
+				/*
+				** Kerekupai: set archive target to none to prevent units coming back to base from the assault
+				*/
+				i->ArchiveTarget = TARGET_NONE;
+				/*
+				** Kerekupai: end of set archive target to none to prevent units coming back to base from the assault
+				*/
+
 				i->Assign_Mission(MISSION_HUNT);
+
+				/*
+				** Kerekupai: AI engineers capture oil derricks
+				**			  AI engineer captures closest oil derrick
+				*/ 
+				n = 0; // counter initialization
+				int value = 0;
+				int best = -1;
+				if (*i == INFANTRY_RENOVATOR)	  // if this infantry is an engineer		 
+				{
+					for (int index = 0; index < Buildings.Count(); index++) {
+						BuildingClass * b = Buildings.Ptr(index);
+
+						if (b != NULL && *b == STRUCT_PUMP && this != b->House && !Is_Ally(b->House) ){
+							// target nearest oil derrick
+							int val = Distance(Center, b->Center_Coord());
+							if (value == 0 || val < value) {
+								value = val;
+								best = index;
+							}
+						}
+					}
+					// Select nearest oil derrick
+					if (best >= 0) {
+						i->Assign_Destination(Buildings.Ptr(best)->As_Target());
+						i->Assign_Mission(MISSION_CAPTURE);
+					}
+				}
+				/*
+				** Kerekupai: end of AI engineers capture oil derricks
+				*/
+
+				/*
+				** Kerekupai: AI spies infiltrate enemy buildings
+				*/ 
+				n = 0; // counter initialization
+				if (*i == INFANTRY_SPY)	  // if this infantry is an spy		 
+				{
+					for (int index = 0; index < Buildings.Count(); index++) {
+						BuildingClass * b = Buildings.Ptr(index);
+
+						if (b != NULL && b->Strength > 0 && b->Can_Capture() && //(*b == STRUCT_AIRSTRIP || *b == STRUCT_HELIPAD) &&
+							this != b->House && !Is_Ally(b->House) &&
+							n < N
+							) {
+							list[n] = index; // store the index value of the building
+							n++;			 // update counter
+						}
+					}
+					// Randomly select among the buildings
+					if (n > 0 && n <= N)
+					{
+						i->Assign_Destination(Buildings.Ptr(list[(rand() % n)])->As_Target());
+						i->Assign_Mission(MISSION_CAPTURE);
+					}
+				}
+				/*
+				** Kerekupai: end of AI spies infiltrate enemy buildings
+				*/
+
+				/*
+				** Kerekupai: AI thiefs infiltrate enemy refineries
+				*/ 
+				n = 0; // counter initialization
+				if (*i == INFANTRY_THIEF )	  // if this infantry is an engineer		 
+				{
+					for (int index = 0; index < Buildings.Count(); index++) {
+						BuildingClass * b = Buildings.Ptr(index);
+
+						if (b != NULL && b->Strength > 0 && *b == STRUCT_REFINERY &&
+							this != b->House && !Is_Ally(b->House) &&
+							n < N
+							) {
+							list[n] = index; // store the index value of the building
+							n++;			 // update counter
+						}
+					}
+					// Randomly select among the buildings
+					if (n > 0 && n <= N)
+					{
+						i->Assign_Destination(Buildings.Ptr(list[(rand() % n)])->As_Target());
+						i->Assign_Mission(MISSION_CAPTURE);
+					}
+				}
+				/*
+				** Kerekupai: end of AI thiefs infiltrate enemy refineries
+				*/
+
 			} else {
+
+				/*
+				** Kerekupai: if there is no mission, assign guard area
+				*/
+				if (i->Mission == MISSION_NONE || i->Mission == MISSION_STICKY || i->Mission == MISSION_SLEEP || i->Mission == MISSION_GUARD)
+					i->Assign_Mission(MISSION_GUARD_AREA);
+				/*
+				** Kerekupai: end of if there is no mission, assign guard area
+				*/
 
 				/*
 				**	If this soldier is guarding the base, then cause it to shuffle
@@ -5338,6 +6055,23 @@ bool HouseClass::AI_Attack(UrgencyType )
 					i->ArchiveTarget = ::As_Target(Where_To_Go(i));
 				}
 			}
+			/*
+			** Kerekupai: if the infantry is far away from home, then send it hunting
+			**			  this may affect those discovered from crates
+			*/
+			if ((i->Is_Weapon_Equipped() || *i == INFANTRY_RENOVATOR) &&
+				(i->Mission != MISSION_HUNT || i->MissionQueue != MISSION_HUNT) && (i->Mission != MISSION_CAPTURE || i->MissionQueue != MISSION_CAPTURE) && i->Mission != MISSION_MOVE) {
+				if (Distance(i->Coord, Center) >= 5 * Radius) {
+					i->Assign_Mission(MISSION_HUNT);
+				}
+				if (Which_Zone(i) == ZONE_NONE && Distance(i->Coord, Center) < 5 * Radius) {
+					i->Assign_Mission(MISSION_GUARD_AREA);
+					i->ArchiveTarget = ::As_Target(Where_To_Go(i));
+				}
+			}
+			/*
+			** Kerekupai: end of if the infantry is far away from home, then send it hunting
+			*/
 		}
 	}
 	Attack = Rule.AttackInterval * Random_Pick(TICKS_PER_MINUTE/2, TICKS_PER_MINUTE*2);
@@ -5421,16 +6155,19 @@ bool HouseClass::AI_Lower_Power(UrgencyType ) const
 {
 	assert(Houses.ID(this) == ID);
 
-	BuildingClass * b = Find_Building(STRUCT_POWER);
-	if (b != NULL) {
-		b->Sell_Back(1);
-		return(true);
-	}
+	if (Session.Type == GAME_NORMAL)
+	{
+		BuildingClass * b = Find_Building(STRUCT_POWER);
+		if (b != NULL) {
+			b->Sell_Back(1);
+			return(true);
+		}
 
-	b = Find_Building(STRUCT_ADVANCED_POWER);
-	if (b != NULL) {
-		b->Sell_Back(1);
-		return(true);
+		b = Find_Building(STRUCT_ADVANCED_POWER);
+		if (b != NULL) {
+			b->Sell_Back(1);
+			return(true);
+		}
 	}
 	return(false);
 }
@@ -5514,44 +6251,50 @@ bool HouseClass::AI_Raise_Money(UrgencyType urgency) const
 	assert(Houses.ID(this) == ID);
 
 	/*
-	**	Sell off structures in this order.
-	*/
-	static struct {
-		StructType	Structure;
-		UrgencyType	Urgency;
-	} _types[] = {
-		{STRUCT_CHRONOSPHERE, URGENCY_LOW},
-		{STRUCT_SHIP_YARD, URGENCY_LOW},
-		{STRUCT_SUB_PEN, URGENCY_LOW},
-		{STRUCT_ADVANCED_TECH, URGENCY_LOW},
-		{STRUCT_FORWARD_COM, URGENCY_LOW},
-		{STRUCT_SOVIET_TECH, URGENCY_LOW},
-		{STRUCT_STORAGE,URGENCY_LOW},
-		{STRUCT_REPAIR,URGENCY_LOW},
-		{STRUCT_TESLA,URGENCY_MEDIUM},
-		{STRUCT_HELIPAD,URGENCY_MEDIUM},
-		{STRUCT_POWER,URGENCY_HIGH},
-		{STRUCT_AIRSTRIP,URGENCY_HIGH},
-//		{STRUCT_WEAP,URGENCY_HIGH},
-//		{STRUCT_BARRACKS,URGENCY_HIGH},
-//		{STRUCT_TENT,URGENCY_HIGH},
-		{STRUCT_CONST,URGENCY_CRITICAL}
-	};
-	BuildingClass * b = 0;
+	** Kerekupai: Restrict the list of sellable buildings
+	*/ 
+		/*
+		**	Sell off structures in this order.
+		*/
+		static struct {
+			StructType	Structure;
+			UrgencyType	Urgency;
+		} _types[] = {
+					{STRUCT_CHRONOSPHERE, URGENCY_LOW},
+					//{STRUCT_SHIP_YARD, URGENCY_LOW},
+					//{STRUCT_SUB_PEN, URGENCY_LOW},
+					//{STRUCT_ADVANCED_TECH, URGENCY_LOW},
+					{STRUCT_FORWARD_COM, URGENCY_LOW},
+					//{STRUCT_SOVIET_TECH, URGENCY_LOW},
+					//{STRUCT_STORAGE,URGENCY_LOW},
+					//{STRUCT_REPAIR,URGENCY_LOW},
+					{STRUCT_TESLA,URGENCY_MEDIUM},
+					{STRUCT_HELIPAD,URGENCY_MEDIUM},
+					{STRUCT_POWER,URGENCY_HIGH},
+					{STRUCT_AIRSTRIP,URGENCY_HIGH},
+		//			{STRUCT_WEAP,URGENCY_HIGH},
+		//			{STRUCT_BARRACKS,URGENCY_HIGH},
+		//			{STRUCT_TENT,URGENCY_HIGH},
+					//{STRUCT_CONST,URGENCY_CRITICAL}
+		};
+		BuildingClass * b = 0;
 
-	/*
-	**	Find a structure to sell and then sell it. Bail from further scanning until
-	**	the next time.
-	*/
-	for (int i = 0; i < ARRAY_SIZE(_types); i++) {
-		if (urgency >= _types[i].Urgency) {
-			b = Find_Building(_types[i].Structure);
-			if (b != NULL) {
-				b->Sell_Back(1);
-				return(true);
+		/*
+		**	Find a structure to sell and then sell it. Bail from further scanning until
+		**	the next time.
+		*/
+		for (int i = 0; i < ARRAY_SIZE(_types); i++) {
+			if (urgency >= _types[i].Urgency) {
+				b = Find_Building(_types[i].Structure);
+				if (b != NULL) {
+					b->Sell_Back(1);
+					return(true);
+				}
 			}
 		}
-	}
+		/*
+		** Kerekupai: end of Restrict the list of sellable buildings
+		*/
 	return(false);
 }
 
@@ -5710,17 +6453,20 @@ int HouseClass::AI_Building(void)
 		**	money available.
 		*/
 		b = &BuildingTypeClass::As_Reference(STRUCT_ADVANCED_POWER);
-		if (Can_Build(b, ActLike) && Power <= Drain+Rule.PowerSurplus && b->Cost_Of() < money) {
+		if (Can_Build(b, ActLike) && Power <= Drain+Rule.PowerSurplus && (b->Cost_Of() < money || hasincome)) {
 			choiceptr = BuildChoice.Alloc();
 			if (choiceptr != NULL) {
-				*choiceptr = BuildChoiceClass(BQuantity[STRUCT_REFINERY] == 0 ? URGENCY_LOW : URGENCY_MEDIUM, b->Type);
+				// Kerekupai: if no power, then urgent critical, else, medium (default)
+				//*choiceptr = BuildChoiceClass(BQuantity[STRUCT_REFINERY] == 0 ? URGENCY_LOW : URGENCY_MEDIUM, b->Type);
+				*choiceptr = BuildChoiceClass(Power_Fraction() > 1 ? URGENCY_MEDIUM : URGENCY_CRITICAL, b->Type); 
 			}
 		} else {
 			b = &BuildingTypeClass::As_Reference(STRUCT_POWER);
-			if (Can_Build(b, ActLike) && Power <= Drain+Rule.PowerSurplus && b->Cost_Of() < money) {
+			if (Can_Build(b, ActLike) && Power <= Drain+Rule.PowerSurplus && (b->Cost_Of() < money || hasincome)) {
 				choiceptr = BuildChoice.Alloc();
 				if (choiceptr != NULL) {
-					*choiceptr = BuildChoiceClass(BQuantity[STRUCT_REFINERY] == 0 ? URGENCY_LOW : URGENCY_MEDIUM, b->Type);
+					//*choiceptr = BuildChoiceClass(BQuantity[STRUCT_REFINERY] == 0 ? URGENCY_LOW : URGENCY_MEDIUM, b->Type); // Kerekupai def low : medium
+					*choiceptr = BuildChoiceClass(Power_Fraction() > 1 ? URGENCY_LOW : URGENCY_MEDIUM, b->Type); // before, URGENCY_HIGH
 				}
 			}
 		}
@@ -5734,10 +6480,28 @@ int HouseClass::AI_Building(void)
 			if (Can_Build(b, ActLike) && (money > b->Cost_Of() || hasincome)) {
 				choiceptr = BuildChoice.Alloc();
 				if (choiceptr != NULL) {
-					*choiceptr = BuildChoiceClass(BQuantity[STRUCT_REFINERY] == 0 ? URGENCY_HIGH : URGENCY_MEDIUM, b->Type);
+					*choiceptr = BuildChoiceClass(BQuantity[STRUCT_REFINERY] > 0 ? URGENCY_HIGH : URGENCY_CRITICAL, b->Type);
 				}
 			}
 		}
+
+		/*
+		**	Kerekupai: Radar dome, urgency medium
+		*/
+		current = BQuantity[STRUCT_RADAR];
+		if (current < 1)
+		{
+			b = &BuildingTypeClass::As_Reference(STRUCT_RADAR);
+			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
+				choiceptr = BuildChoice.Alloc();
+				if (choiceptr != NULL) {
+					*choiceptr = BuildChoiceClass(URGENCY_MEDIUM, b->Type);
+				}
+			}
+		}
+		/*
+		**	Kerekupai: end of Radar dome, urgency medium
+		*/
 
 		/*
 		**	Always make sure there is a barracks available, but only if there
@@ -5749,18 +6513,55 @@ int HouseClass::AI_Building(void)
 			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
 				choiceptr = BuildChoice.Alloc();
 				if (choiceptr != NULL) {
-					*choiceptr = BuildChoiceClass(current > 0 ? URGENCY_LOW : URGENCY_MEDIUM, b->Type);
+					*choiceptr = BuildChoiceClass(current > 0 ? URGENCY_MEDIUM : URGENCY_HIGH, b->Type); // Kerekupai default low : medium
 				}
 			} else {
 				b = &BuildingTypeClass::As_Reference(STRUCT_TENT);
 				if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
 					choiceptr = BuildChoice.Alloc();
 					if (choiceptr != NULL) {
-						*choiceptr = BuildChoiceClass(current > 0 ? URGENCY_LOW : URGENCY_MEDIUM, b->Type);
+						*choiceptr = BuildChoiceClass(current > 0 ? URGENCY_MEDIUM : URGENCY_HIGH, b->Type); // Kerekupai default low : medium
 					}
 				}
 			}
 		}
+
+		/*
+		** Kerekupai: AI build silos 
+		*/
+		unsigned int n_silos = 8;
+		current = BQuantity[STRUCT_STORAGE];
+		if (current < n_silos && money > 1500 + (int)current * 1500)
+		{
+			b = &BuildingTypeClass::As_Reference(STRUCT_STORAGE);
+			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
+				choiceptr = BuildChoice.Alloc();
+				if (choiceptr != NULL) {
+					*choiceptr = BuildChoiceClass(current > 2 ? URGENCY_LOW : URGENCY_MEDIUM, b->Type);
+				}
+			}
+		}
+		/*
+		** Kerekupai: end of AI build silos 
+		*/
+
+		/*
+		** Kerekupai: AI builds hospital
+		*/ 
+		current = BQuantity[STRUCT_HOSPITAL];
+		if (current < 2)
+		{
+			b = &BuildingTypeClass::As_Reference(STRUCT_HOSPITAL);
+			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
+				choiceptr = BuildChoice.Alloc();
+				if (choiceptr != NULL) {
+					*choiceptr = BuildChoiceClass(current > 0 ? URGENCY_LOW : URGENCY_HIGH, b->Type);
+				}
+			}
+		}
+		/*
+		** Kerekupai: end of AI builds hospital
+		*/
 
 		/*
 		**	Try to build one dog house.
@@ -5771,7 +6572,7 @@ int HouseClass::AI_Building(void)
 			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
 				choiceptr = BuildChoice.Alloc();
 				if (choiceptr != NULL) {
-					*choiceptr = BuildChoiceClass(URGENCY_MEDIUM, b->Type);
+					*choiceptr = BuildChoiceClass(URGENCY_HIGH, b->Type);
 				}
 			}
 		}
@@ -5800,37 +6601,103 @@ int HouseClass::AI_Building(void)
 			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
 				choiceptr = BuildChoice.Alloc();
 				if (choiceptr != NULL) {
-					*choiceptr = BuildChoiceClass(current > 0 ? URGENCY_LOW : URGENCY_MEDIUM, b->Type);
+					*choiceptr = BuildChoiceClass(current > 0 ? URGENCY_MEDIUM : URGENCY_HIGH, b->Type); // kerekupai: default low : medium
 				}
 			}
 		}
 
 		/*
+		** Kerekupai: AI builds naval yard / sub pen
+		*/ 
+		current = BQuantity[STRUCT_SHIP_YARD];
+		if (current < Round_Up(Rule.WarRatio*fixed(CurBuildings)) && current < (unsigned)Rule.WarLimit && (money > 2000 || hasincome)) {
+			b = &BuildingTypeClass::As_Reference(STRUCT_SHIP_YARD);
+			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
+				choiceptr = BuildChoice.Alloc();
+				if (choiceptr != NULL) {
+					//*choiceptr = BuildChoiceClass(current < 1 ? URGENCY_MEDIUM : URGENCY_LOW, b->Type); // Kerekupai
+					*choiceptr = BuildChoiceClass(current > 0 ? URGENCY_MEDIUM : URGENCY_HIGH, b->Type);
+				}
+			}
+		}
+
+		current = BQuantity[STRUCT_SUB_PEN];
+		if (current < Round_Up(Rule.WarRatio*fixed(CurBuildings)) && current < (unsigned)Rule.WarLimit && (money > 2000 || hasincome)) {
+			b = &BuildingTypeClass::As_Reference(STRUCT_SUB_PEN);
+			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
+				choiceptr = BuildChoice.Alloc();
+				if (choiceptr != NULL) {
+					//*choiceptr = BuildChoiceClass(current < 1 ? URGENCY_MEDIUM : URGENCY_LOW, b->Type); // Kerekupai
+					*choiceptr = BuildChoiceClass(current > 0 ? URGENCY_MEDIUM : URGENCY_HIGH, b->Type);
+				}
+			}
+		}
+		/*
+		** Kerekupai: end of AI builds naval yard / sub pen
+		*/
+
+		/*
 		**	Always build up some base defense.
 		*/
 		current = BQuantity[STRUCT_PILLBOX] + BQuantity[STRUCT_CAMOPILLBOX] + BQuantity[STRUCT_TURRET] + BQuantity[STRUCT_FLAME_TURRET];
+
+		/*
+		** Kerekupai: manage defense urgency value
+		*/ 
+		UrgencyType urgency;
+		if (current < (unsigned)Rule.DefenseLimit) {
+			urgency = URGENCY_MEDIUM;
+		}
+		else {
+			urgency = URGENCY_LOW;
+		}
+		if (State == STATE_ATTACKED) {
+			urgency++;
+		}
+		/*
+		** Kerekupai: end of manage defense urgency value
+		*/
+
 		if (current < Round_Up(Rule.DefenseRatio*fixed(CurBuildings)) && current < (unsigned)Rule.DefenseLimit) {
 			b = &BuildingTypeClass::As_Reference(STRUCT_FLAME_TURRET);
 			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
 				choiceptr = BuildChoice.Alloc();
 				if (choiceptr != NULL) {
-					*choiceptr = BuildChoiceClass(URGENCY_MEDIUM, b->Type);
+					*choiceptr = BuildChoiceClass(urgency, b->Type);
 				}
 			} else {
 				if (Percent_Chance(50)) {
-					b = &BuildingTypeClass::As_Reference(STRUCT_PILLBOX);
-					if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
-						choiceptr = BuildChoice.Alloc();
-						if (choiceptr != NULL) {
-							*choiceptr = BuildChoiceClass(URGENCY_MEDIUM, b->Type);
+					/*
+					** Kerekupai: AI builds cammo pillbox
+					*/
+					if (Percent_Chance(50)) {
+						b = &BuildingTypeClass::As_Reference(STRUCT_PILLBOX);
+						if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
+							choiceptr = BuildChoice.Alloc();
+							if (choiceptr != NULL) {
+								*choiceptr = BuildChoiceClass(urgency, b->Type);
+							}
 						}
 					}
+					else {
+						b = &BuildingTypeClass::As_Reference(STRUCT_CAMOPILLBOX);
+						if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
+							choiceptr = BuildChoice.Alloc();
+							if (choiceptr != NULL) {
+								*choiceptr = BuildChoiceClass(urgency, b->Type);
+							}
+						}
+					}
+					/*
+					** Kerekupai: end of AI builds cammo pillbox
+					*/
+					
 				} else {
 					b = &BuildingTypeClass::As_Reference(STRUCT_TURRET);
 					if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
 						choiceptr = BuildChoice.Alloc();
 						if (choiceptr != NULL) {
-							*choiceptr = BuildChoiceClass(URGENCY_MEDIUM, b->Type);
+							*choiceptr = BuildChoiceClass(urgency, b->Type);
 						}
 					}
 				}
@@ -5896,13 +6763,20 @@ int HouseClass::AI_Building(void)
 		/*
 		**	Advanced base defense would be good.
 		*/
+		/*
+		** Kerekupai: manage urgency type for tesla defenses
+		*/
 		current = BQuantity[STRUCT_TESLA];
+		urgency = URGENCY_MEDIUM;
+		if (State == STATE_ATTACKED) {
+			urgency++;
+		}
 		if (current < Round_Up(Rule.TeslaRatio*fixed(CurBuildings)) && current < (unsigned)Rule.TeslaLimit) {
 			b = &BuildingTypeClass::As_Reference(STRUCT_TESLA);
 			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome) && Power_Fraction() >= 1) {
 				choiceptr = BuildChoice.Alloc();
 				if (choiceptr != NULL) {
-					*choiceptr = BuildChoiceClass(URGENCY_MEDIUM, b->Type);
+					*choiceptr = BuildChoiceClass(urgency, b->Type);
 				}
 			}
 		}
@@ -5916,23 +6790,46 @@ int HouseClass::AI_Building(void)
 			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome) && Power_Fraction() >= 1) {
 				choiceptr = BuildChoice.Alloc();
 				if (choiceptr != NULL) {
-					*choiceptr = BuildChoiceClass(URGENCY_MEDIUM, b->Type);
+					*choiceptr = BuildChoiceClass(URGENCY_HIGH, b->Type); // Kerekupai defult URGENCY_MEDIUM
 				}
 			} else {
 				b = &BuildingTypeClass::As_Reference(STRUCT_SOVIET_TECH);
 				if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome) && Power_Fraction() >= 1) {
 					choiceptr = BuildChoice.Alloc();
 					if (choiceptr != NULL) {
-						*choiceptr = BuildChoiceClass(URGENCY_MEDIUM, b->Type);
+						*choiceptr = BuildChoiceClass(URGENCY_HIGH, b->Type); // Kerekupai defult URGENCY_MEDIUM
 					}
 				}
 			}
 		}
 
 		/*
+		** Kerekupai: Allies create chronosphere
+		*/
+		if (BQuantity[STRUCT_CHRONOSPHERE] < 1)
+		{
+			b = &BuildingTypeClass::As_Reference(STRUCT_CHRONOSPHERE);
+			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome) && Power_Fraction() >= 1) {
+				choiceptr = BuildChoice.Alloc();
+				if (choiceptr != NULL) {
+					*choiceptr = BuildChoiceClass(URGENCY_MEDIUM, b->Type);
+				}
+			}
+		}
+		/*
+		** Kerekupai: end of Allies create chronosphere
+		*/
+
+		/*
 		**	A helipad would be good.
 		*/
+
+		/*
+		** Kerekupai: manage urgency for creation of helis and aircraft
+		**			  based on air threat
+		*/
 		current = BQuantity[STRUCT_HELIPAD];
+		urgency = URGENCY_MEDIUM;
 		if (current < Round_Up(Rule.HelipadRatio*fixed(CurBuildings)) && current < (unsigned)Rule.HelipadLimit) {
 			b = &BuildingTypeClass::As_Reference(STRUCT_HELIPAD);
 			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
@@ -5941,15 +6838,20 @@ int HouseClass::AI_Building(void)
 					int threat_quantity = 0;
 					if (enemy != NULL) {
 						threat_quantity = enemy->CurAircraft;
+						if (CurAircraft < (unsigned)threat_quantity)
+							urgency++; // increase the urgency value if air threat present
 					}
-
-					*choiceptr = BuildChoiceClass((CurAircraft < (unsigned)threat_quantity) ? URGENCY_HIGH : URGENCY_MEDIUM, b->Type);
+					//*choiceptr = BuildChoiceClass((CurAircraft < (unsigned)threat_quantity) ? URGENCY_HIGH : URGENCY_MEDIUM, b->Type);
+					*choiceptr = BuildChoiceClass((current < 1) ? URGENCY_HIGH : urgency, b->Type);
 				}
 			}
 		}
 
 		/*
 		**	An airstrip would be good.
+		*/
+		/*
+		** Kerekupai: airplanes use the same urgency value set for helis
 		*/
 		current = BQuantity[STRUCT_AIRSTRIP];
 		if (current < Round_Up(Rule.AirstripRatio*fixed(CurBuildings)) && current < (unsigned)Rule.AirstripLimit) {
@@ -5961,11 +6863,33 @@ int HouseClass::AI_Building(void)
 					if (enemy != NULL) {
 						threat_quantity = enemy->CurAircraft;
 					}
-
-					*choiceptr = BuildChoiceClass((CurAircraft < (unsigned)threat_quantity) ? URGENCY_HIGH : URGENCY_MEDIUM, b->Type);
+					//*choiceptr = BuildChoiceClass((CurAircraft < (unsigned)threat_quantity) ? URGENCY_HIGH : URGENCY_MEDIUM, b->Type);
+					*choiceptr = BuildChoiceClass((current < 1) ? URGENCY_HIGH : urgency, b->Type);
 				}
 			}
 		}
+		/*
+		** Kerekupai: end of manage urgency for creation of helis and aircraft
+		**			  based on air threat
+		*/
+
+		/*
+		** Kerekupai: AI creates repair pad
+		*/ 
+		current = BQuantity[STRUCT_REPAIR];
+		if (current == 0) {
+			b = &BuildingTypeClass::As_Reference(STRUCT_REPAIR);
+			if (Can_Build(b, ActLike) && b->Cost_Of() < money) {
+				choiceptr = BuildChoice.Alloc();
+				if (choiceptr) {
+					*choiceptr = BuildChoiceClass(BQuantity[STRUCT_WEAP] > 0 ? URGENCY_MEDIUM : URGENCY_LOW, b->Type); // Kerekupai: def high : low
+				}
+			}
+		}
+		/*
+		** Kerekupai: AI builds repair pad
+		*/
+
 
 #ifdef OLD
 		/*
@@ -5984,9 +6908,47 @@ int HouseClass::AI_Building(void)
 #endif
 
 		/*
+		** Kerekupai: AI creates superweapons
+		*/ 
+		UrgencyType u;
+		bool superweapon_is_present = false;
+		// check if a enemy has already a superweapon
+		// and manage urgency level
+		for (HousesType house2 = HOUSE_MULTI1; house2 < HOUSE_COUNT; house2++) {
+			HouseClass * hptr = HouseClass::As_Pointer(house2);
+			if (hptr != NULL && hptr->IsActive && !hptr->IsDefeated) {
+				if (hptr->BQuantity[STRUCT_MSLO])
+				{
+					superweapon_is_present = true;
+				}
+			}
+		}
+		if (BQuantity[STRUCT_REPAIR] > 0 || superweapon_is_present) {
+			u = URGENCY_HIGH;
+		}
+		else {
+			u = URGENCY_MEDIUM;
+		}
+		// create the superweapon
+		if (BQuantity[STRUCT_MSLO] < 1)
+		{
+			b = &BuildingTypeClass::As_Reference(STRUCT_MSLO);
+			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
+				choiceptr = BuildChoice.Alloc();
+				if (choiceptr != NULL) {
+					//*choiceptr = BuildChoiceClass(BQuantity[STRUCT_REPAIR] > 0 ? URGENCY_MEDIUM : URGENCY_LOW, b->Type);
+					*choiceptr = BuildChoiceClass(u, b->Type);
+				}
+			}
+		}
+		/*
+		** Kerekupai: AI creates superweapons
+		*/
+
+		/*
 		**	Pick the choice that is the most urgent.
 		*/
-		UrgencyType best = URGENCY_NONE;
+		/*UrgencyType best = URGENCY_NONE;
 		int bestindex;
 		for (int index = 0; index < BuildChoice.Count(); index++) {
 			if (BuildChoice.Ptr(index)->Urgency > best) {
@@ -5996,7 +6958,44 @@ int HouseClass::AI_Building(void)
 		}
 		if (best != URGENCY_NONE) {
 			BuildStructure = BuildChoice.Ptr(bestindex)->Structure;
+		}*/
+
+		/*
+		** Kerekupai: random selection among structures of similar urgency
+		*/ 
+		int const N = 100;
+		int list[N];
+		int n = 0;
+
+		UrgencyType best = URGENCY_NONE;
+		int bestindex;
+		for (int index = 0; index < BuildChoice.Count(); index++) {
+			if (BuildChoice.Ptr(index)->Urgency > best) {
+				bestindex = index;
+				best = BuildChoice.Ptr(index)->Urgency;
+			}
 		}
+		for (int index = 0; index < BuildChoice.Count(); index++) {
+			if (BuildChoice.Ptr(index)->Urgency == best) {
+				// update list
+				if (n < N) {
+					list[n] = index;
+					n++;
+				}
+			}
+		}
+
+		// perform a random pick if more than one structure have the same priority
+		if (n > 0 && n <= N)
+		{
+			bestindex = list[(rand() % n)];
+		}
+		if (best != URGENCY_NONE) {
+			BuildStructure = BuildChoice.Ptr(bestindex)->Structure;
+		}
+		/*
+		** Kerekupai: end of random selection among structures of similar urgency
+		*/
 	}
 
 	return(TICKS_PER_SECOND);
@@ -6122,10 +7121,56 @@ int HouseClass::AI_Unit(void)
 		UnitType index;
 		for (index = UNIT_FIRST; index < UNIT_COUNT; index++) {
 			UnitTypeClass const * utype = &UnitTypeClass::As_Reference(index);
-			if (Can_Build(utype, ActLike) && utype->Type != UNIT_HARVESTER) {
+			if (Can_Build(utype, ActLike) && utype->Type != UNIT_HARVESTER && utype->Type != UNIT_DEMOTRUCK) {
 				if (utype->PrimaryWeapon != NULL) {
 					counter[index] = 20;
-				} else {
+				}
+				/*
+				** Kerekupai: AI does not create minelayer in skirmish
+				*/ 
+				else if (utype->Type == UNIT_TRUCK) {
+					counter[index] = 2;
+				}
+				/*
+				** Kerekupai: Limit demotruck to one at a time
+				*/
+				else if (utype->Type == UNIT_DEMOTRUCK) {
+					if (UQuantity[UNIT_DEMOTRUCK] < 1 && !MPSuperWeaponDisable)
+					{
+						counter[index] = 1; //1
+					}
+					else {
+						counter[index] = 0;
+					}
+				}
+				/*
+				** Kerekupai: no AI minelayer
+				*/
+				else if (utype->Type == UNIT_MINELAYER) {
+					if (UQuantity[UNIT_MINELAYER] < 1)
+					{
+						counter[index] = 1;
+					}
+					else {
+						counter[index] = 0;
+					}
+				}
+				/*
+				** Kerekupai: limited to two construction yards
+				*/
+				else if (utype->Type == UNIT_MCV) {
+					if (BQuantity[STRUCT_CONST] + UQuantity[UNIT_MCV] < 2)
+					{
+						counter[index] = 1;
+					}
+					else {
+						counter[index] = 0;
+					}
+				}
+				/*
+				** Kerekupai: end of AI does not create minelayer in skirmish
+				*/
+				else {
 					counter[index] = 1;
 				}
 			} else {
@@ -6249,8 +7294,49 @@ int HouseClass::AI_Vessel(void)
 		}
 	}
 
+	/*
+	** Kerekupai: AI creates vessels in normal and skirmish modes
+	*/ 
 	if (IsBaseBuilding) {
-		BuildVessel = VESSEL_NONE;
+		int counter[VESSEL_COUNT];
+		int total = 0;
+		VesselType index;
+		for (index = VESSEL_FIRST; index < VESSEL_COUNT; index++) {
+			VesselTypeClass const * vtype = &VesselTypeClass::As_Reference(index);
+			if (Can_Build(vtype, ActLike)) {
+				if (vtype->Type == VESSEL_SS || vtype->Type == VESSEL_DD || vtype->Type == VESSEL_PT) {
+					counter[index] = 10;
+				}
+				else if (vtype->Type == VESSEL_CA || vtype->Type == VESSEL_MISSILESUB)
+				{
+					counter[index] = 10;
+				}
+				else {
+					counter[index] = 0; //1
+				}
+			}
+			else {
+				counter[index] = 0;
+			}
+			total += counter[index];
+		}
+
+		if (total > 0) {
+			int choice = Random_Pick(0, total - 1);
+			for (index = VESSEL_FIRST; index < VESSEL_COUNT; index++) {
+				if (choice < counter[index]) {
+					BuildVessel = index;
+					break;
+				}
+				choice -= counter[index];
+			}
+		}
+	   // COPIED FROM AI_UNIT (above)
+
+		/*
+		** Kerekupai: AI creates vessels in normal and skirmish modes
+		*/
+		//BuildVessel = VESSEL_NONE;
 	}
 
 	return(TICKS_PER_SECOND);
@@ -6373,6 +7459,13 @@ int HouseClass::AI_Infantry(void)
 			enemy = HouseClass::As_Pointer(Enemy);
 		}
 
+		// Kerekupai: enemy vehicle factory present?
+		bool factory = false;
+		if (enemy != NULL && enemy->BQuantity[STRUCT_WEAP] > 0)
+		{
+			factory = true;
+		}
+
 		/*
 		**	This structure is used to keep track of the list of infantry types that should be
 		**	built. The infantry type and the value assigned to it is recorded.
@@ -6396,19 +7489,25 @@ int HouseClass::AI_Infantry(void)
 
 					switch (index) {
 						case INFANTRY_E1:
-							typetrack[count].Value = 3;
+							typetrack[count].Value = 5;
 							break;
 
 						case INFANTRY_E2:
-							typetrack[count].Value = 5;
+							typetrack[count].Value = 3;
 							break;
 
 						case INFANTRY_E3:
-							typetrack[count].Value = 2;
+							if (factory)
+							{
+								typetrack[count].Value = 3; // default 2
+							}
+							else {
+								typetrack[count].Value = 2;
+							}
 							break;
 
 						case INFANTRY_E4:
-							typetrack[count].Value = 5;
+							typetrack[count].Value = 3;
 							break;
 
 						case INFANTRY_RENOVATOR:
@@ -6416,8 +7515,43 @@ int HouseClass::AI_Infantry(void)
 								typetrack[count].Value = 1 - max(IQuantity[index], 0);
 							}
 							break;
+						/*
+						** Kerekupai: AI creates dog, Medic, Mechanic, Spy, Thief, Shock tropper
+						*/ 
+						case INFANTRY_DOG:
+							typetrack[count].Value = 2;
+							break;
+						case INFANTRY_MEDIC:
+							if (CurInfantry > 5) {
+								typetrack[count].Value = 1 - max(IQuantity[index], 0);
+							}
+							break;
+						case INFANTRY_MECHANIC:
+							if (CurInfantry > 5) {
+								typetrack[count].Value = 1 - max(IQuantity[index], 0);
+							}
+							break;
+						case INFANTRY_SHOCK:
+							typetrack[count].Value = 3;
+							break;
+						case INFANTRY_SPY:
+							if (CurInfantry > 5) {
+								typetrack[count].Value = 1 - max(IQuantity[index], 0);
+							}
+							break;
+						case INFANTRY_THIEF:
+							if (CurInfantry > 5) {
+								typetrack[count].Value = 1 - max(IQuantity[index], 0);
+							}
+							break;
+							/*
+							** Kerekupai: end of AI creates dog, Medic, Mechanic, Spy, Thief, Shock tropper
+							*/
 
 						case INFANTRY_TANYA:
+							typetrack[count].Value = 1 - max(IQuantity[index], 0);
+							break;
+						case INFANTRY_GENERAL:
 							typetrack[count].Value = 1 - max(IQuantity[index], 0);
 							break;
 
@@ -6505,6 +7639,18 @@ int HouseClass::AI_Aircraft(void)
 			BuildAircraft = AIRCRAFT_YAK;
 			return(TICKS_PER_SECOND);
 		}
+
+		if (Session.Type != GAME_NORMAL) // isbasebuilding // only skirmish 
+		{
+			if (Can_Build(&AircraftTypeClass::As_Reference(AIRCRAFT_TRANSPORT), ActLike) &&
+				//AircraftTypeClass::As_Reference(AIRCRAFT_YAK).Level <= (unsigned)Control.TechLevel &&
+				AircraftTypeClass::As_Reference(AIRCRAFT_TRANSPORT).Level <= (unsigned)BuildLevel &&
+				AQuantity[AIRCRAFT_TRANSPORT] < 1) {
+				BuildAircraft = AIRCRAFT_TRANSPORT;
+				return(TICKS_PER_SECOND);
+			}
+		}
+
 	}
 
 	return(TICKS_PER_SECOND);
@@ -7097,7 +8243,48 @@ CELL HouseClass::Where_To_Go(FootClass const * object) const
 		zone = Random_Pick(ZONE_NORTH, ZONE_WEST);
 	}
 
-	CELL cell = Random_Cell_In_Zone(zone);
+	/*
+	** Kerekupai: units avoid cells too close to refineries
+	*/
+	CELL cell;
+	//int const N = Rule.RefineryLimit;
+	// create an array of own refineries
+	BuildingClass * refineries[10];
+	int n = 0;
+	for (int index = 0; index < Buildings.Count(); index++) {
+		BuildingClass * b = Buildings.Ptr(index);
+
+		if (b != NULL && *b == STRUCT_REFINERY && !b->IsInLimbo &&
+			(HouseClass *)b->House == this && b->Strength > 0) {
+			refineries[n] = b;
+			n++;
+		}
+	}
+
+
+	int radius = 0;
+	int loop_control = 0;
+	while (radius < (4 * CELL_LEPTON_W) && loop_control < 10) {
+		cell = Random_Cell_In_Zone(zone);
+		radius = 20;
+		for (int i = 0; i < n; i++)
+		{
+			// get distance to nearest refinery
+			if (Distance(Cell_Coord(cell), refineries[i]->Center_Coord()) < radius)
+				radius = Distance(Cell_Coord(cell), refineries[i]->Center_Coord());
+		}
+		
+		// assign a random zone
+		zone = Random_Pick(ZONE_NORTH, ZONE_WEST);
+		// update loop control
+		loop_control++;
+	}
+	
+	/*
+	** Kerekupai: units avoid cells too close to refineries
+	*/
+
+	//CELL cell = Random_Cell_In_Zone(zone);
 	assert(cell != 0);
 
 	return(Map.Nearby_Location(cell, SPEED_TRACK, Map[cell].Zones[MZONE_NORMAL], MZONE_NORMAL));
@@ -8229,4 +9416,38 @@ void HouseClass::Free_Unit_Trackers(void)
 		delete TotalCrates;
 		TotalCrates = NULL;
 	}
+}
+
+/***********************************************************************************************
+ * HouseClass::AI_Harvesters --  Get any harvesters which have crashed into each other         *
+ *								 moving again. Checks the Harvester location every 6 seconds   *
+ *                                                                                             *
+ *			#MinorAIFixes                                                                      *
+ *                                                                                             *
+ * INPUT:   none																			   *
+ *                                                                                             *
+ * OUTPUT:  none                                                                               *
+ *                                                                                             *
+ * WARNINGS:   none                                                                            *
+ *                                                                                             *
+ * HISTORY:                                                                                    *
+ *   20/10/2020 Created.                                                                       *
+ *=============================================================================================*/
+void HouseClass::AI_Harvesters(void)
+{
+	assert(Houses.ID(this) == ID);
+	if (Frame % 323 == 0) 
+	{
+		if (UQuantity[UNIT_HARVESTER] > 0) {
+			for (int index = 0; index < Units.Count(); index++) 
+			{
+				UnitClass * u = Units.Ptr(index);
+				if (u != NULL && *u == UNIT_HARVESTER && u->House == this && !u->IsInLimbo && u->Strength > 0) {
+					u->Unstick_Harvesters();
+				}
+			}
+		}
+	}
+	
+	return;
 }

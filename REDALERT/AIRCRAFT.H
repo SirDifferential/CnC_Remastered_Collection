@@ -158,6 +158,18 @@ class AircraftClass : public FootClass, public FlyClass
 		virtual RadioMessageType Receive_Message(RadioClass * from, RadioMessageType message, long & param);
 		virtual void Scatter(COORDINATE threat, bool forced=false, bool nokidding=false);
 
+		/* 
+		** Kerekupai: playing with friends?	
+		*/
+		bool gaming_with_friends;
+		short n_human_players;
+
+		/*
+		**  Check whether helicopter units overlap at given cell
+		**  Kerekupai
+		*/
+		TARGET check_overlap(TARGET oldlz) const;
+
 		/*
 		**	Scenario and debug support.
 		*/

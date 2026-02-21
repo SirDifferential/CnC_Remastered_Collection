@@ -1085,4 +1085,15 @@ void Enable_Uncompressed_Shapes (void);
 */
 void On_Achievement_Event(const HouseClass* player_ptr, const char *achievement_type, const char *achievement_reason);
 
+/*
+** Kerekupai: CFE PATCH REDUX RALLY POINT
+*/
+
+bool CFE_Patch_Unit_Should_Rally(const TechnoClass& object);
+bool CFE_Patch_Can_Have_Rally_Point(const ObjectClass& object);
+
+/*
+** Kerekupai: end CFE PATCH REDUX RALLY POINT
+*/
+
 #endif

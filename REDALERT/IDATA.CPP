@@ -712,7 +712,7 @@ static InfantryTypeClass const General(
 	false,						// Does this unit use the override remap table?
 	false,						// Always use the given name for the infantry?
 	false,						// Theater specific graphic image?
-	PIP_ENGINEER,				// Transport pip shape/color to use.
+	PIP_COMMANDO,// Kerekupai PIP_ENGINEER,				// Transport pip shape/color to use.
 	GeneralDoControls,
 	GeneralDoControls,
 	2,								// Frame of projectile launch.

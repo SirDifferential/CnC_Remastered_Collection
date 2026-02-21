@@ -494,7 +494,47 @@ void UnitClass::AI(void)
 		if (!Is_Door_Closed() && Mission != MISSION_UNLOAD && Transmit_Message(RADIO_TRYING_TO_LOAD) != RADIO_ROGER) {
 			APC_Close_Door();
 		}
+
+		/*
+		** Kerekupai: truck unloads cargo in skirmish
+		*/ 
+		// assign mission unload if next to enemy building
+		if (*this == UNIT_TRUCK && Is_Something_Attached() && Session.Type != GAME_NORMAL && !House->IsHuman)
+		{
+			for (int index = 0; index < Buildings.Count(); index++) {
+				BuildingClass * b = Buildings.Ptr(index);
+
+				if (b != NULL && b->Can_Capture() && /*(*b == STRUCT_TENT || *b == STRUCT_BARRACKS || *b == STRUCT_CONST) &&*/ 
+					!House->Is_Ally(b->House) && Distance(b) < 5 * CELL_LEPTON_W) { // before 7
+					Assign_Mission(MISSION_UNLOAD);
+					break;
+				}
+			} 
+		}
+		/*
+		** Kerekupai: end of truck unloads cargo in skirmish
+		*/
 	}
+
+	/*
+	** Kerekupai: AI deploys MAD tank in skirmish when close to enemy buildings
+	*/
+	// assign mission unload if next to enemy building
+	if (*this == UNIT_MAD && Session.Type != GAME_NORMAL && !House->IsHuman)
+	{
+		for (int index = 0; index < Buildings.Count(); index++) {
+			BuildingClass * b = Buildings.Ptr(index);
+
+			if (b != NULL && b->Can_Capture() &&
+				!House->Is_Ally(b->House) && Distance(b) < 7 * CELL_LEPTON_W) {
+				Assign_Mission(MISSION_UNLOAD);
+				break;
+			}
+		}
+	}
+	/*
+	** Kerekupai: end of AI deploys MAD tank in skirmish when close to enemy buildings
+	*/
 
 	/*
 	**	Don't start a new mission unless the vehicle is in the center of
@@ -517,6 +557,21 @@ void UnitClass::AI(void)
 	if (Class->IsGapper && !IsDriving && (Frame % TICKS_PER_SECOND) == 0) {
 		Shroud_Regen();
 	}
+
+	/*
+	** Kerekupai: Units exit repair pad if full health
+	*/ 
+	/*if (Strength >= Class->MaxStrength && (*this != UNIT_MINELAYER || Ammo >= Class->MaxAmmo) &&
+		In_Radio_Contact() && Contact_With_Whom()->What_Am_I() == RTTI_BUILDING &&
+		*((BuildingClass *)Contact_With_Whom()) == STRUCT_REPAIR)
+	{
+		Transmit_Message(RADIO_OVER_OUT);
+		ArchiveTarget = TARGET_NONE;
+		Scatter(0, true);
+	}*/
+	/*
+	** Kerekupai: end of Units exit repair pad if full health
+	*/
 }
 
 
@@ -1224,6 +1279,14 @@ ResultType UnitClass::Take_Damage(int & damage, int distance, WarheadType warhea
 		if (*this == UNIT_HARVESTER && !House->IsHuman && source) {
 			Base_Is_Attacked(source);
 		}
+
+		/*
+		** Kerekupai: fireback the source
+		*/
+		// RA has its own routine defining this behavior in techno.cpp (is_allow_to_retaliate) and foot.cpp (take_damage)
+		/*
+		** Kerekupai: end of fireback the source
+		*/
 	}
 	return(res);
 }
@@ -2515,7 +2578,105 @@ int UnitClass::Mission_Unload(void)
 
 			Assign_Mission(MISSION_HARVEST);
 			break;
+			
+		/*
+		** Kerekupai: jeep unload cargo (copied from truck)
+		*/
+		case UNIT_JEEP:
+			switch (Status) {
+			case INITIAL_CHECK:
+				dir = Desired_Load_Dir(NULL, cell);
+				if (How_Many() && cell != 0) {
+					Do_Turn(dir);
+					Status = MANEUVERING;
+					return(1);
+				}
+				else {
+					Assign_Mission(MISSION_GUARD);
+				}
+				break;
 
+			case MANEUVERING:
+				if (!IsRotating) {
+					Status = UNLOADING;
+					return(1);
+				}
+				break;
+
+			case UNLOADING:
+				if (How_Many()) {
+					FootClass * passenger = Detach_Object();
+
+					if (passenger != NULL) {
+						DirType toface = DIR_S + PrimaryFacing;
+						bool placed = false;
+
+						for (FacingType face = FACING_N; face < FACING_COUNT; face++) {
+							DirType newface = toface + Facing_Dir(face);
+							CELL newcell = Adjacent_Cell(Coord_Cell(Coord), newface);
+
+							if (passenger->Can_Enter_Cell(newcell) == MOVE_OK) {
+								ScenarioInit++;
+								passenger->Unlimbo(Coord_Move(Coord, newface, 0x0080), newface);
+								ScenarioInit--;
+								passenger->Assign_Mission(MISSION_MOVE);
+								passenger->Assign_Destination(::As_Target(newcell));
+								placed = true;
+								/*
+								** Kerekupai: send passengers hunting
+								*/
+									//if (Session.Type != GAME_NORMAL && !House->IsHuman)
+									//	passenger->Assign_Mission(MISSION_HUNT);
+								bool unit_can_infiltrate = false;
+								if ((*((InfantryClass *)passenger) == INFANTRY_RENOVATOR ||
+									*((InfantryClass *)passenger) == INFANTRY_THIEF ||
+									*((InfantryClass *)passenger) == INFANTRY_SPY
+									)
+									)
+								{
+									unit_can_infiltrate = true;
+								}
+
+								if (!House->IsHuman && (passenger->Is_Weapon_Equipped() || *(InfantryClass *)passenger == INFANTRY_DOG || unit_can_infiltrate)) {
+									passenger->ArchiveTarget = TARGET_NONE;
+									passenger->Assign_Target(TARGET_NONE);
+									passenger->Assign_Mission(MISSION_HUNT);
+								}
+								/*
+								** Kerekupai: end of send passengers hunting
+								*/
+								break;
+							}
+						}
+
+						/*
+						** If the attached unit could NOT be deployed, then re-attach
+						**	it and then bail out of this deploy process.
+						*/
+						if (!placed) {
+							Attach(passenger);
+							Status = CLOSING_DOOR;
+						}
+						else {
+							passenger->Look(false);
+						}
+					}
+				}
+				else {
+					Status = CLOSING_DOOR;
+				}
+				break;
+				/*
+				**	Close APC door in preparation for normal operation.
+				*/
+			case CLOSING_DOOR:
+				Assign_Mission(MISSION_GUARD);
+				break;
+			}
+			break;
+			/*
+			** Kerekupai: jeep unload cargo
+			*/
 		case UNIT_TRUCK:
 			switch (Status) {
 				case INITIAL_CHECK:
@@ -2555,6 +2716,29 @@ int UnitClass::Mission_Unload(void)
 									passenger->Assign_Mission(MISSION_MOVE);
 									passenger->Assign_Destination(::As_Target(newcell));
 									placed = true;
+									/*
+									** Kerekupai: send passengers hunting
+									*/
+									//if (Session.Type != GAME_NORMAL && !House->IsHuman)
+									//	passenger->Assign_Mission(MISSION_HUNT);
+									bool unit_can_infiltrate = false;
+									if ((*((InfantryClass *)passenger) == INFANTRY_RENOVATOR ||
+										*((InfantryClass *)passenger) == INFANTRY_THIEF ||
+										*((InfantryClass *)passenger) == INFANTRY_SPY
+										)
+										)
+									{
+										unit_can_infiltrate = true;
+									}
+
+									if (!House->IsHuman && (passenger->Is_Weapon_Equipped() || *(InfantryClass *)passenger == INFANTRY_DOG || unit_can_infiltrate)) {
+										passenger->ArchiveTarget = TARGET_NONE;
+										passenger->Assign_Target(TARGET_NONE);
+										passenger->Assign_Mission(MISSION_HUNT);
+									}
+									/*
+									** Kerekupai: end of send passengers hunting
+									*/
 									break;
 								}
 							}
@@ -2641,6 +2825,31 @@ int UnitClass::Mission_Unload(void)
 									passenger->Assign_Mission(MISSION_MOVE);
 									passenger->Assign_Destination(::As_Target(newcell));
 									placed = true;
+
+									/*
+									** Kerekupai: send passengers hunting
+									*/
+									//if (Session.Type != GAME_NORMAL && !House->IsHuman)
+									//	passenger->Assign_Mission(MISSION_HUNT);
+									bool unit_can_infiltrate = false;
+									if ((*((InfantryClass *)passenger) == INFANTRY_RENOVATOR ||
+										*((InfantryClass *)passenger) == INFANTRY_THIEF ||
+										*((InfantryClass *)passenger) == INFANTRY_SPY
+										)
+										)
+									{
+										unit_can_infiltrate = true;
+									}
+
+									if (!House->IsHuman && (passenger->Is_Weapon_Equipped() || *(InfantryClass *)passenger == INFANTRY_DOG || unit_can_infiltrate)) {
+										passenger->ArchiveTarget = TARGET_NONE;
+										passenger->Assign_Target(TARGET_NONE);
+										passenger->Assign_Mission(MISSION_HUNT);
+									}
+									/*
+									** Kerekupai: end of send passengers hunting
+									*/
+
 									break;
 								}
 							}
@@ -3017,19 +3226,96 @@ int UnitClass::Mission_Harvest(void)
 				**	Since the refinery said it was ok to load, establish radio
 				**	contact with the refinery and then await docking orders.
 				*/
+
+				/*
+				** Kerekupai: speak delay silos needed
+				** only spoken once per harvester. Reset when money falls below certain storage limit
+				*/ 
 				if (nearest != NULL && Transmit_Message(RADIO_HELLO, nearest) == RADIO_ROGER) {
 					Status = HEADINGHOME;
-					if (nearest->House == PlayerPtr && (PlayerPtr->Capacity - PlayerPtr->Tiberium) < 300 && PlayerPtr->Capacity > 500 && (PlayerPtr->ActiveBScan & (STRUCTF_REFINERY | STRUCTF_CONST))) {
+					if (nearest->House == PlayerPtr && 
+					    (PlayerPtr->Capacity - PlayerPtr->Tiberium) < 300 && 
+						PlayerPtr->Capacity > 500 && 
+						(PlayerPtr->ActiveBScan & (STRUCTF_REFINERY | STRUCTF_CONST)) &&
+						can_speak_silos_needed
+						) 
+					{
 						Speak(VOX_NEED_MO_CAPACITY);
+						can_speak_silos_needed = false;
 					}
 				} else {
-					ScenarioInit++;
-					nearest = Find_Best_Refinery();
-					ScenarioInit--;
-					if (nearest != NULL) {
-						Assign_Destination(::As_Target(Nearby_Location(nearest)));
+					//ScenarioInit++;
+					/*
+					** Kerekupai: Harvester tries another refinery, if the preferred one is busy
+					**			  if the alternative refinery is nearby (in radius of 20 cells)
+					*/
+					nearest = NULL;
+					for (int index = 0; index < Buildings.Count(); index++) {
+						BuildingClass * alternative_refinery = Buildings.Ptr(index);
+
+						/*
+						**	Check to see if the building qualifies (preliminary scan).
+						*/
+						if (alternative_refinery != NULL && TiberiumUnloadRefinery != NULL &&
+							!alternative_refinery->IsInLimbo &&
+							*alternative_refinery == STRUCT_REFINERY && alternative_refinery->House == House &&
+							!alternative_refinery->Is_Something_Attached() && 
+							!alternative_refinery->In_Radio_Contact() &&
+							(alternative_refinery->Distance(TiberiumUnloadRefinery) < 10 * CELL_LEPTON_W)
+							//((TechnoClass *)this)->Transmit_Message(RADIO_CAN_LOAD, alternative_refinery) == RADIO_ROGER
+							) 
+						{
+							nearest = alternative_refinery;
+							break;
+						}
 					}
+					if (nearest == NULL)
+					{
+						ScenarioInit++;
+						nearest = Find_Best_Refinery();
+						ScenarioInit--;
+						if (nearest != NULL) {
+							/*
+							** Kerekupai: haversters skip the line
+							*/
+
+							if (Transmit_Message(RADIO_HELLO, nearest) == RADIO_ROGER)
+							{
+								Status = HEADINGHOME;
+							}
+							/*
+							** Kerekupai: end of haversters skip the line
+							*/
+							else {
+								Assign_Destination(::As_Target(Nearby_Location(nearest)));// Nearby_Location(nearest)));
+							}
+						}
+					}
+					else {
+						TiberiumUnloadRefinery = nearest->As_Target();
+						//nearest = Find_Best_Refinery();
+						//Assign_Destination(nearest->As_Target());
+						Status = HEADINGHOME;
+					}
+					/*
+					** Kerekupai: end of Harvester tries another refinery, if the preferred one is busy
+					*/
+
+					//nearest = Find_Best_Refinery();
+					//nearest = Find_Docking_Bay(STRUCT_REFINERY, false);
+					//ScenarioInit--;
+					/*if (nearest != NULL) {
+						Assign_Destination(::As_Target(Nearby_Location(nearest)));
+					}*/
 				}
+				// Kerekupai: allow speak silos needed the next time there is no storage capacity
+				if ((PlayerPtr->Capacity - PlayerPtr->Tiberium) > 300)
+				{
+					can_speak_silos_needed = true;
+				}
+				/*
+				** Kerekupai: speak delay silos needed
+				*/
 			}
 			break;
 
@@ -3217,6 +3503,13 @@ MoveType UnitClass::Can_Enter_Cell(CELL cell, FacingType ) const
 	if ((unsigned)cell >= MAP_CELL_TOTAL) return(MOVE_NO);
 
 	/*
+	** Kerekupai: AI has ghost harversters
+	*/
+	bool ghost_harvester = false;
+	if (*this == UNIT_HARVESTER && !House->IsHuman && Session.Type != GAME_NORMAL)
+		ghost_harvester = true;
+
+	/*
 	**	Moving off the edge of the map is not allowed unless
 	**	this is a loaner vehicle.
 	*/
@@ -3233,7 +3526,11 @@ MoveType UnitClass::Can_Enter_Cell(CELL cell, FacingType ) const
 	if (cellptr->Overlay != OVERLAY_NONE) {
 		OverlayTypeClass const * optr = &OverlayTypeClass::As_Reference(cellptr->Overlay);
 
-		if (optr->IsCrate && !((Session.Type == GAME_NORMAL) ? House->IsPlayerControl : House->IsHuman) && Session.Type == GAME_NORMAL) {
+		/*
+		** Kerekupai: AI can take crates in skirmish
+		*/ 
+		//if (optr->IsCrate && !((Session.Type == GAME_NORMAL) ? House->IsPlayerControl : House->IsHuman) && Session.Type == GAME_NORMAL) {
+		if (optr->IsCrate && Session.Type == GAME_NORMAL && !House->IsHuman) {
 			return(MOVE_NO);
 		}
 
@@ -3312,7 +3609,10 @@ MoveType UnitClass::Can_Enter_Cell(CELL cell, FacingType ) const
 //						(((FootClass *)obj)->IsRotating || ((FootClass *)obj)->IsDriving);
 //						(Target_Legal(((FootClass *)obj)->NavCom) || ((FootClass *)obj)->IsDriving);
 
-			if (House->Is_Ally(obj)) {
+			/*
+			** Kerekupai: AI has ghost harversters
+			*/
+			if (House->Is_Ally(obj) && !ghost_harvester) {
 				if (is_moving) {
 					int face 		= Dir_Facing(PrimaryFacing);
 					int techface	= Dir_Facing(((FootClass const *)obj)->PrimaryFacing) ^4;
@@ -3405,16 +3705,26 @@ MoveType UnitClass::Can_Enter_Cell(CELL cell, FacingType ) const
 	**	If some allied object has reserved the cell, then consider the cell
 	**	as blocked by a moving object.
 	*/
+	/*
+	** Kerekupai: AI has ghost harversters
+	*/
 	if (retval == MOVE_OK && !crushable && (cellptr->Flag.Composite & 0x3F) != 0) {
+	//if (retval == MOVE_OK && !crushable && (cellptr->Flag.Composite & 0x3F) != 0 && !ghost_harvester) {
 
 		/*
 		**	If reserved by a vehicle, then consider this blocked terrain.
 		*/
 		if (cellptr->Flag.Occupy.Vehicle) {
 			retval = MOVE_MOVING_BLOCK;
+			
 		} else {
-			if (cellptr->InfType != HOUSE_NONE && House->Is_Ally(cellptr->InfType)) {
+			/*
+			** Kerekupai: AI has ghost harversters
+			*/
+			//if (cellptr->InfType != HOUSE_NONE && House->Is_Ally(cellptr->InfType)) {
+			if (cellptr->InfType != HOUSE_NONE && House->Is_Ally(cellptr->InfType) && !ghost_harvester) {
 				retval = MOVE_MOVING_BLOCK;
+
 			} else {
 
 				/*
@@ -3438,7 +3748,15 @@ MoveType UnitClass::Can_Enter_Cell(CELL cell, FacingType ) const
 	** If its ok to move into the cell because we can crush whats in the cell, then
 	** make sure no one else is already moving into the cell to crush something.
 	*/
-	if (retval == MOVE_OK && crushable && cellptr->Flag.Occupy.Vehicle) {
+	/*
+	** Kerekupai: AI has ghost harversters
+	*/
+	if (retval == MOVE_MOVING_BLOCK && ghost_harvester && House->Is_Ally(cellptr->Cell_Unit()))
+	{
+		retval = MOVE_OK;
+	}
+	//if (retval == MOVE_OK && crushable && cellptr->Flag.Occupy.Vehicle) {
+	if (retval == MOVE_OK && crushable && cellptr->Flag.Occupy.Vehicle && !ghost_harvester) {
 
 		/*
 		**	However, if the cell is occupied by a crushable vehicle, then we can
@@ -3450,6 +3768,12 @@ MoveType UnitClass::Can_Enter_Cell(CELL cell, FacingType ) const
 			return(MOVE_MOVING_BLOCK);
 		}
 	}
+
+	/*
+	** Kerekupai: AI has ghost harversters
+	*/
+	if (cellptr->Cell_Unit() && House->Is_Ally(cellptr->Cell_Unit()) && ghost_harvester)
+		retval = MOVE_OK;
 
 	/*
 	**	Return with the most severe reason why this cell would be impassable.
@@ -3625,12 +3949,24 @@ ActionType UnitClass::What_Action(ObjectClass const * object) const
 	/*
 	**	Special return to friendly repair factory action.
 	*/
-	if (is_player_controlled && action == ACTION_SELECT && object->What_Am_I() == RTTI_BUILDING) {
+	/*
+	** Kerekupai: allies can use repair depot
+	*/ 
+	if (//is_player_controlled && 
+		//action == ACTION_SELECT && // kerekupai commented out
+		object->What_Am_I() == RTTI_BUILDING &&
+		(House->Class->House == object->Owner() || House->Is_Ally(object->Owner()))
+		) {
 		BuildingClass * building = (BuildingClass *)object;
-		if (building->Class->Type == STRUCT_REPAIR && ((UnitClass *)this)->Transmit_Message(RADIO_CAN_LOAD, building) == RADIO_ROGER && !building->In_Radio_Contact() && !building->Is_Something_Attached()) {
-			action = ACTION_MOVE;
+		//if (building->Class->Type == STRUCT_REPAIR && ((UnitClass *)this)->Transmit_Message(RADIO_CAN_LOAD, building) == RADIO_ROGER && !building->In_Radio_Contact() && !building->Is_Something_Attached()) {
+		if (building->Class->Type == STRUCT_REPAIR && !building->In_Radio_Contact() && !building->Is_Something_Attached()) {
+			//action = ACTION_MOVE; // Kerekupai: default value
+			action = ACTION_ENTER; // Kerekupai: mod value allies use repair depot
 		}
 	}
+	/*
+	** Kerekupai: end of allies can use repair depot
+	*/
 
 	/*
 	**	Check to see if it can enter a transporter.
@@ -4160,7 +4496,11 @@ int UnitClass::Mission_Repair(void)
 	assert(Units.ID(this) == ID);
 	assert(IsActive);
 
-	BuildingClass * nearest = Find_Docking_Bay(STRUCT_REFINERY, true);
+	/*
+	** Kerekupai: mission repair actually looks for repair bay stations
+	*/
+	//BuildingClass * nearest = Find_Docking_Bay(STRUCT_REFINERY, true); // original
+	BuildingClass * nearest = Find_Docking_Bay(STRUCT_REPAIR, true);
 
 	IsHarvesting = false;
 
@@ -4444,16 +4784,35 @@ fixed UnitClass::Tiberium_Load(void) const
 BuildingClass* UnitClass::Find_Best_Refinery(void) const
 {
 	/*
+	** Kerekupai: try first a closer refinery
+	*/
+
+	BuildingClass * nearest = Find_Docking_Bay(STRUCT_REFINERY, false);
+	if (nearest != NULL && TiberiumUnloadRefinery != NULL &&
+		nearest->As_Target() != TiberiumUnloadRefinery &&
+		Distance(nearest) < Distance(TiberiumUnloadRefinery) &&
+		!nearest->In_Radio_Contact())
+	{
+		TiberiumUnloadRefinery = nearest->As_Target();
+	}
+
+	/*
+	** Kerekupai: try first a closer refinery
+	*/
+
+	/*
 	**	Remember our last refinery and prefer that one, if still available and valid.
 	*/
 	if (Target_Legal(TiberiumUnloadRefinery)) {
 		BuildingClass * refinery = As_Building(TiberiumUnloadRefinery);
+
 		if (refinery != NULL &&
 			refinery->House == House &&
 			!refinery->IsInLimbo &&
 			refinery->Mission != MISSION_DECONSTRUCTION &&
 			*refinery == STRUCT_REFINERY &&
 			Map[refinery->Center_Coord()].Zones[Techno_Type_Class()->MZone] == Map[Center_Coord()].Zones[Techno_Type_Class()->MZone]) {
+
 			return refinery;
 		} else {
 			TiberiumUnloadRefinery = TARGET_NONE;
@@ -4697,29 +5056,31 @@ void UnitClass::Assign_Destination(TARGET target)
 				**	toward the transport and try to establish contact at a later time.
 				*/
 				if (b->In_Radio_Contact()) {
-// TCTCTC -- call for an update from the transport to get a good rendezvous position.
+					// TCTCTC -- call for an update from the transport to get a good rendezvous position.
 					ArchiveTarget = target;
 
-/*
-**	HACK ALERT: The repair bay is counting on the assignment of the NavCom by this routine.
-**	The refinery must NOT have the navcom assigned by this routine.
-*/
-if (*b != STRUCT_REPAIR) {
-	target = TARGET_NONE;
-}
-				} else {
+					/*
+					**	HACK ALERT: The repair bay is counting on the assignment of the NavCom by this routine.
+					**	The refinery must NOT have the navcom assigned by this routine.
+					*/
+					if (*b != STRUCT_REPAIR) {
+						target = TARGET_NONE;
+					}
+				}
+				else {
 					if (Transmit_Message(RADIO_DOCKING, b) != RADIO_ROGER) {
 						Transmit_Message(RADIO_OVER_OUT);
 						if (*b == STRUCT_REPAIR) {
 							ArchiveTarget = target;
 						}
 					}
-if (*b != STRUCT_REPAIR) {
-	ArchiveTarget = target;
-	target = TARGET_NONE;
-}
+					if (*b != STRUCT_REPAIR) {
+						ArchiveTarget = target;
+						target = TARGET_NONE;
+					}
 				}
-			} else {
+			}
+			else {
 				TechnoClass * techno = As_Techno(target);
 				if (techno != NULL) {
 
@@ -4728,14 +5089,16 @@ if (*b != STRUCT_REPAIR) {
 					**	toward the transport and try to establish contact at a later time.
 					*/
 					if (techno->In_Radio_Contact()) {
-	// TCTCTC -- call for an update from the transport to get a good rendezvous position.
+						// TCTCTC -- call for an update from the transport to get a good rendezvous position.
 
 						ArchiveTarget = target;
-					} else {
+					}
+					else {
 						if (Transmit_Message(RADIO_HELLO, techno) == RADIO_ROGER) {
 							if (Transmit_Message(RADIO_DOCKING) != RADIO_ROGER) {
 								Transmit_Message(RADIO_OVER_OUT);
-							} else {
+							}
+							else {
 								//BG: keep retransmitted navcom from radio-move-here.
 								return;
 							}
@@ -4744,10 +5107,12 @@ if (*b != STRUCT_REPAIR) {
 				}
 
 			}
-		} else {
+		}
+		else {
 			Path[0] = FACING_NONE;
 		}
-	} else {
+	}
+	else {
 		Path[0] = FACING_NONE;
 	}
 
@@ -4756,12 +5121,13 @@ if (*b != STRUCT_REPAIR) {
 	**	facility is currently not involved with some other unit (radio or unloading).
 	*/
 	if (b != NULL && *b == STRUCT_REPAIR) {
-		if (b->In_Radio_Contact() && (b->Contact_With_Whom() != this) ) {
-//			if (target != NULL) {
-				ArchiveTarget = target;
-//			}
-//			target = TARGET_NONE;
-		} else {
+		if (b->In_Radio_Contact() && (b->Contact_With_Whom() != this)) {
+			//			if (target != NULL) {
+			ArchiveTarget = target;
+			//			}
+			//			target = TARGET_NONE;
+		}
+		else {
 
 			/*
 			**	Establish radio contact protocol. If the facility responds correctly,
@@ -4773,7 +5139,7 @@ if (*b != STRUCT_REPAIR) {
 				**	Last check to make sure that the loading square is free from permanent
 				**	occupation (such as a building).
 				*/
-				CELL cell = (CELL)(Coord_Cell(b->Center_Coord()) + (MAP_CELL_W-1));
+				CELL cell = (CELL)(Coord_Cell(b->Center_Coord()) + (MAP_CELL_W - 1));
 				if (Ground[Map[cell].Land_Type()].Cost[Techno_Type_Class()->Speed] > 0) {
 					if (Transmit_Message(RADIO_DOCKING) == RADIO_ROGER) {
 						FootClass::Assign_Destination(target);
@@ -4786,6 +5152,7 @@ if (*b != STRUCT_REPAIR) {
 					**	Bail & await further instructions.
 					*/
 					Transmit_Message(RADIO_OVER_OUT);
+
 				}
 			}
 		}
@@ -5316,7 +5683,11 @@ int UnitClass::Mission_Guard_Area(void)
 	*/
 	if (Session.Type != GAME_NORMAL &&
 #ifdef FIXIT_PHASETRANSPORT	//	checked - ajw 9/28/98
-			(*this == UNIT_APC || *this == UNIT_PHASE ) &&
+			/*
+			** Kerekupai: convoy trucks and jeep also load up infantry
+			*/ 
+			(*this == UNIT_APC || *this == UNIT_TRUCK || *this == UNIT_JEEP || *this == UNIT_PHASE) &&
+			//(*this == UNIT_APC || *this == UNIT_PHASE ) &&
 #else
 			*this == UNIT_APC &&
 #endif
@@ -5349,4 +5720,82 @@ int UnitClass::Mission_Guard_Area(void)
 		}
 	}
 	return(DriveClass::Mission_Guard_Area());
+}
+
+/***********************************************************************************************
+ * UnitClass::Unstick_Harvesters -- Gets any stuck Harvesters moving                           *
+ *                                                                                             *
+ *    Kerekupai from #MinorAIFIXES                                                             *
+ *                                                                                             *
+ * INPUT:   none                                                                               *
+ *                                                                                             *
+ * OUTPUT:  none                                                                               *
+ *                                                                                             *
+ * WARNINGS:   none                                                                            *
+ *                                                                                             *
+ * HISTORY:                                                                                    *
+ *   20/10/2020 Created.                                                                       *
+ *=============================================================================================*/
+void UnitClass::Unstick_Harvesters(void)
+{
+	assert(IsActive);
+
+	if (LastHarvesterCell == 0) {
+		LastHarvesterCell = Coord_Cell(Coord);
+		return;
+	}
+
+	if (Mission == MISSION_HARVEST && !In_Radio_Contact() && Coord_Cell(Coord) == LastHarvesterCell && PrimaryFacing != DIR_SW_X1 && PrimaryFacing != DIR_SW_X2) {
+		CELL cell1 = Coord_Cell(Coord);
+		CELL cell2 = Reverse_Cell(PrimaryFacing, Coord_Cell(Coord));
+
+		Assign_Destination(::As_Target(cell2));
+		LastHarvesterCell = Coord_Cell(Coord);
+	}
+	else {
+		LastHarvesterCell = Coord_Cell(Coord);
+	}
+}
+
+/***********************************************************************************************
+ * UnitClass::Reverse_Cell -- Returns the rearward Cell to an input Direction                  *
+ *                                                                                             *
+ *   Kerekupai from #MinorAIFIXES                                                              *
+ *                                                                                             *
+ * INPUT:   Current Direction, Current Coord                                                   *
+ *                                                                                             *
+ * OUTPUT:  Cell behind the Unit                                                               *
+ *                                                                                             *
+ * WARNINGS:   none                                                                            *
+ *                                                                                             *
+ * HISTORY:                                                                                    *
+ *   20/10/2020 Created.                                                                       *
+ *=============================================================================================*/
+CELL UnitClass::Reverse_Cell(DirType dir, CELL CurrentLocation)
+{
+	assert(IsActive);
+
+	//char var2[256];
+
+	switch (dir) {
+	case DIR_N:
+		return(Adjacent_Cell(CurrentLocation, DIR_S));
+	case DIR_NE:
+		return(Adjacent_Cell(CurrentLocation, DIR_SW));
+	case DIR_E:
+		return(Adjacent_Cell(CurrentLocation, DIR_W));
+	case DIR_SE:
+		return(Adjacent_Cell(CurrentLocation, DIR_NW));
+	case DIR_S:
+		return(Adjacent_Cell(CurrentLocation, DIR_N));
+	case DIR_SW:
+		return(Adjacent_Cell(CurrentLocation, DIR_NE));
+	case DIR_W:
+		return(Adjacent_Cell(CurrentLocation, DIR_E));
+	case DIR_NW:
+		return(Adjacent_Cell(CurrentLocation, DIR_SE));
+	default:
+		return(CurrentLocation);
+	}
+	return(CurrentLocation);
 }
