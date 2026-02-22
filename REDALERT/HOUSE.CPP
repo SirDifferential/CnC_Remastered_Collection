@@ -682,6 +682,19 @@ HouseClass::HouseClass(HousesType house) :
 	Attack = Rule.AttackDelay * Random_Pick(TICKS_PER_MINUTE/2, TICKS_PER_MINUTE*2);
 
 	Init_Unit_Trackers();
+
+	// Create a build order
+	// GEKKO TODO: This needs adjusting for loading a game
+	buildOrder.addToBuildOrder(STRUCT_POWER);
+	buildOrder.addToBuildOrder(STRUCT_REFINERY);
+	buildOrder.addToBuildOrder(STRUCT_BARRACKS);
+	buildOrder.addToBuildOrder(STRUCT_REFINERY);
+	buildOrder.addToBuildOrder(STRUCT_POWER);
+	buildOrder.addToBuildOrder(STRUCT_WEAP);
+	buildOrder.addToBuildOrder(STRUCT_POWER);
+	buildOrder.addToBuildOrder(STRUCT_RADAR);
+	buildOrder.addToBuildOrder(STRUCT_ADVANCED_POWER);
+	buildOrder.addToBuildOrder(STRUCT_REFINERY);
 }
 
 
@@ -798,6 +811,7 @@ bool HouseClass::Can_Build(ObjectTypeClass const * type, HousesType house) const
 
 	/*
 	**	The computer can always build everything.
+	*   GEKKO NOTE: I think this only applies to main game, not skirmish
 	*/
 	if (!IsHuman && Session.Type == GAME_NORMAL) return(true);
 
@@ -5645,7 +5659,6 @@ int HouseClass::AI_Base_Defense(void)
 }
 #endif
 
-
 /***********************************************************************************************
  * HouseClass::AI_Building -- Determines what building to build.                               *
  *                                                                                             *
@@ -5661,7 +5674,7 @@ int HouseClass::AI_Base_Defense(void)
  *   09/29/1995 JLB : Created.                                                                 *
  *   11/03/1996 JLB : Tries to match aircraft of enemy                                         *
  *=============================================================================================*/
-int HouseClass::AI_Building(void)
+int HouseClass::AI_Building_Original(void)
 {
 	assert(Houses.ID(this) == ID);
 
@@ -5696,6 +5709,7 @@ int HouseClass::AI_Building(void)
 		StructType stype = STRUCT_NONE;
 		int money = Available_Money();
 		int level = Control.TechLevel;
+		// GEKKO TODO: IsTiberiumShort might be worth investigating
 		bool hasincome = (BQuantity[STRUCT_REFINERY] > 0 && !IsTiberiumShort && UQuantity[UNIT_HARVESTER] > 0);
 		BuildingTypeClass const * b = NULL;
 		HouseClass const * enemy = NULL;
@@ -5728,6 +5742,7 @@ int HouseClass::AI_Building(void)
 		/*
 		**	Build a refinery if there isn't one already available.
 		*/
+		// GEKKO TODO: What is Rule.RefineryLimit
 		unsigned int current = BQuantity[STRUCT_REFINERY];
 		if (!IsTiberiumShort && current < Round_Up(Rule.RefineryRatio*fixed(CurBuildings)) && current < (unsigned)Rule.RefineryLimit) {
 			b = &BuildingTypeClass::As_Reference(STRUCT_REFINERY);
@@ -5794,6 +5809,7 @@ int HouseClass::AI_Building(void)
 		**	A source of combat vehicles is always needed, but only if there will
 		**	be sufficient money to build vehicles.
 		*/
+		// GEKKO TODO: change money limit to 800 or so
 		current = BQuantity[STRUCT_WEAP];
 		if (current < Round_Up(Rule.WarRatio*fixed(CurBuildings)) && current < (unsigned)Rule.WarLimit && (money > 2000 || hasincome)) {
 			b = &BuildingTypeClass::As_Reference(STRUCT_WEAP);
@@ -6002,6 +6018,102 @@ int HouseClass::AI_Building(void)
 	return(TICKS_PER_SECOND);
 }
 
+/**
+ * Modified AI build function uses build orders
+ */
+int HouseClass::AI_Building(void)
+{
+	// If not a skirmish game, don't follow build orders
+	if (Session.Type != GAME_SKIRMISH) {
+		AI_Building_Original();
+		return(TICKS_PER_SECOND);
+	}
+
+	assert(Houses.ID(this) == ID);
+
+	// If already building
+	if (BuildStructure != STRUCT_NONE) return(TICKS_PER_SECOND);
+
+	// Get build order and follow it until needed
+	StructType toBuild = buildOrder.getNext();
+	if (toBuild == STRUCT_NONE) {
+		// Build order is complete. Use normal build logic
+		AI_Building_Original();
+		return(TICKS_PER_SECOND);
+	}
+
+	// follow build order
+	BuildingTypeClass const * b = NULL;
+
+	switch (toBuild) {
+	case STRUCT_POWER:
+        b = &BuildingTypeClass::As_Reference(STRUCT_ADVANCED_POWER);
+		break;
+	case STRUCT_ADVANCED_POWER:
+        b = &BuildingTypeClass::As_Reference(STRUCT_ADVANCED_POWER);
+		break;
+	case STRUCT_REFINERY:
+        b = &BuildingTypeClass::As_Reference(STRUCT_ADVANCED_POWER);
+		break;
+	case STRUCT_BARRACKS:
+        b = &BuildingTypeClass::As_Reference(STRUCT_ADVANCED_POWER);
+		break;
+	case STRUCT_SOVIET_TECH:
+        b = &BuildingTypeClass::As_Reference(STRUCT_ADVANCED_POWER);
+		break;
+	case STRUCT_ADVANCED_TECH:
+        b = &BuildingTypeClass::As_Reference(STRUCT_ADVANCED_POWER);
+		break;
+	case STRUCT_RADAR:
+        b = &BuildingTypeClass::As_Reference(STRUCT_ADVANCED_POWER);
+		break;
+	case STRUCT_REPAIR:
+        b = &BuildingTypeClass::As_Reference(STRUCT_ADVANCED_POWER);
+		break;
+	case STRUCT_WEAP:
+        b = &BuildingTypeClass::As_Reference(STRUCT_ADVANCED_POWER);
+		break;
+	default:
+		break;
+	}
+
+	if (b == NULL) {
+		AI_Building_Original();
+		return(TICKS_PER_SECOND);
+	}
+
+	int money = Available_Money();
+	int level = Control.TechLevel;
+	BuildChoice.Free_All();
+	BuildChoiceClass * choiceptr;
+
+	if (Can_Build(b, ActLike) && b->Cost_Of() < money) {
+		choiceptr = BuildChoice.Alloc();
+		if (choiceptr != NULL) {
+			*choiceptr = BuildChoiceClass(URGENCY_HIGH, b->Type);
+		}
+	}
+
+	/*
+	**	Pick the choice that is the most urgent.
+	*	GEKKO TODO: Maybe push several entries to the list with
+	*   various levels of urgency
+	*/
+	UrgencyType best = URGENCY_NONE;
+	int bestindex;
+	for (int index = 0; index < BuildChoice.Count(); index++) {
+		if (BuildChoice.Ptr(index)->Urgency > best) {
+			bestindex = index;
+			best = BuildChoice.Ptr(index)->Urgency;
+		}
+	}
+	if (best != URGENCY_NONE) {
+		BuildStructure = BuildChoice.Ptr(bestindex)->Structure;
+		// GEKKO TODO: remove from queue here, for now build endless power plants
+	}
+
+	return(TICKS_PER_SECOND);
+}
 
 /***********************************************************************************************
  * HouseClass::AI_Unit -- Determines what unit to build next.                                  *

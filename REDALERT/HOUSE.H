@@ -39,6 +39,7 @@
 #include	"region.h"
 #include	"vector.h"
 #include "Credits.h"
+#include "BUILDORDER.H"
 
 class TriggerClass;
 class FootClass;
@@ -849,6 +850,7 @@ class HouseClass {
 	private:
 		void Silo_Redraw_Check(long oldtib, long oldcap);
 		int AI_Building(void);
+		int AI_Building_Original(void);
 		int AI_Unit(void);
 		int AI_Vessel(void);
 		int AI_Infantry(void);
@@ -906,6 +908,8 @@ class HouseClass {
 
 		static TFixedIHeapClass<BuildChoiceClass> BuildChoice;
 
+		// The build order the AI player will follow, takes priority over BuildChoice
+		BuildOrder buildOrder;
 
 	/*
 	** These values are for multiplay only.

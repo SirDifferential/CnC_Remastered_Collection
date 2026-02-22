@@ -892,6 +892,9 @@
     <ClCompile Include="DLLInterfaceEditor.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="BUILDORDER.CPP">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ABSTRACT.H">
@@ -1765,6 +1768,9 @@
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="MPMGRD.H">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="BUILDORDER.H">
       <Filter>Source Files</Filter>
     </ClInclude>
   </ItemGroup>
