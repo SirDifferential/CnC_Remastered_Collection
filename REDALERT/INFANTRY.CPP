@@ -435,7 +435,12 @@ ResultType InfantryClass::Take_Damage(int & damage, int distance, WarheadType wa
 		**	If an engineer is damaged and it is just sitting there, then tell it
 		**	to go do something since it will definitely die if it doesn't.
 		*/
-		if (!House->IsHuman && *this == INFANTRY_RENOVATOR && (Mission == MISSION_GUARD || Mission == MISSION_GUARD_AREA)) {
+		/*
+		** Kerekupai: also consider the dog, spy and thief to go hunting if injured
+		*/ 
+		if (!House->IsHuman && (*this == INFANTRY_RENOVATOR || *this == INFANTRY_SPY || 
+							    *this == INFANTRY_THIEF || *this == INFANTRY_DOG) && 
+			(Mission == MISSION_GUARD || Mission == MISSION_GUARD_AREA)) {
 			Assign_Mission(MISSION_HUNT);
 		}
 
@@ -460,6 +465,15 @@ ResultType InfantryClass::Take_Damage(int & damage, int distance, WarheadType wa
 			if (Health_Ratio() > Rule.ConditionYellow) morefear /= 2;
 			Fear = FearType(min((int)Fear + morefear, FEAR_MAXIMUM));
 		}
+
+		/*
+		** Kerekupai: fireback the source
+		*/
+		// RA has its own routine defining this behavior in techno.cpp (is_allow_to_retaliate) and foot.cpp (take_damage)
+		/*
+		** Kerekupai: end of fireback the source
+		*/
+
 	}
 	return(res);
 }
@@ -622,14 +636,41 @@ void InfantryClass::Per_Cell_Process(PCPType why)
 		*/
 		if (Mission == MISSION_CAPTURE) {
 			TechnoClass * tech = cellptr->Cell_Building();
+			
 			if (tech != NULL) {
 				if ((tech->As_Target() == NavCom || tech->As_Target() == TarCom) && !tech->Can_Capture()) {
 					tech = NULL;
 					Assign_Destination(TARGET_NONE);
 				}
-			} else {
+
+				/*if (tech != NULL && tech->Mission == MISSION_DECONSTRUCTION)
+				{
+					tech = NULL;
+					Assign_Destination(TARGET_NONE);
+				}*/
+
+				/*
+				** Kerekupai: technicians go back to work
+				*/ 
+				if (tech != NULL && (*this == INFANTRY_C1 || *this == INFANTRY_C7) && Strength > 0) {
+					if ((tech->As_Target() == NavCom || tech->As_Target() == TarCom) && tech->House->Is_Ally(House) && House->IsHuman) {
+						delete this;
+						return;
+					}
+					else {
+						tech = NULL;
+						Assign_Destination(TARGET_NONE);
+					}
+				}
+				/*
+				** Kerekupai: end of technicians go back to work
+				*/ 
+
+			}
+			else {
 				tech = cellptr->Cell_Techno();
 			}
+
 			if (tech != NULL && (tech->As_Target() == NavCom || tech->As_Target() == TarCom)) {
 				if (*this == INFANTRY_RENOVATOR) {
 
@@ -648,42 +689,45 @@ void InfantryClass::Per_Cell_Process(PCPType why)
 							tech->Trigger->Spring(TEVENT_PLAYER_ENTERED, this);
 						}
 						tech->Renovate();
-					} else {
+					}
+					else {
 						bool iscapturable = false;
 						if (tech->What_Am_I() == RTTI_BUILDING) {
 							iscapturable = tech->Can_Capture();
 						}
 #ifdef FIXIT_ENGINEER	//	checked - ajw 9/28/98
-						if (tech->Health_Ratio() <= EngineerCaptureLevel && iscapturable) {
+						if (tech->Health_Ratio() <= fixed::fixed(float(1.0)) && iscapturable) { // Kerekupai: instant capture //EngineerCaptureLevel
 #else
 						if (tech->Health_Ratio() <= Rule.ConditionRed && iscapturable) {
 #endif
 							if (tech->Trigger.Is_Valid()) {
 								tech->Trigger->Spring(TEVENT_PLAYER_ENTERED, this);
-							}
+						}
 							tech->House->IsThieved = true;
 							tech->Captured(House);
-						} else {
+						}
+						else {
 #ifdef FIXIT_ENGINEER	//	checked - ajw 9/28/98
-							int damage = min( (short)((int)(tech->Techno_Type_Class()->MaxStrength) * EngineerDamage), tech->Strength-1);
+							int damage = min((short)((int)(tech->Techno_Type_Class()->MaxStrength) * EngineerDamage), tech->Strength - 1);
 #else
-							int damage = min( (tech->Techno_Type_Class()->MaxStrength) / 3, tech->Strength-1);
+							int damage = min((tech->Techno_Type_Class()->MaxStrength) / 3, tech->Strength - 1);
 #endif
 							tech->Take_Damage(damage, 0, WARHEAD_HE, this, true);
 						}
 						BEnd(BENCH_PCP);
 						delete this;
 						return;
-					}
+						}
 
-				} else {
+					}
+				else {
 					if (*this != INFANTRY_SPY && tech->Trigger.Is_Valid()) {
 						tech->Trigger->Spring(TEVENT_PLAYER_ENTERED, this);
 					}
 
 					if (*this == INFANTRY_SPY) {
 						int housespy = (1 << (House->Class->House));
-//						tech->House->IsSpied = true;
+						//						tech->House->IsSpied = true;
 
 						if (tech->Trigger.Is_Valid()) {
 							tech->Trigger->Spring(TEVENT_SPIED, this);
@@ -696,12 +740,15 @@ void InfantryClass::Per_Cell_Process(PCPType why)
 						tech->Mark(MARK_OVERLAP_DOWN);
 						if (tech->What_Am_I() == RTTI_BUILDING) {
 							StructType build = *(BuildingClass *)tech;
-							if (build == STRUCT_RADAR /* || build == STRUCT_EYE */ ) {
+							if (build == STRUCT_RADAR /* || build == STRUCT_EYE */) {
 								tech->House->RadarSpied |= housespy;
 							}
-							
-							if (Session.Type == GAME_NORMAL || !MPSuperWeaponDisable) {
-							
+
+							/*
+							** Kerekupai: parabomb and sonar are no longer considered superweapons
+							*/
+							if (1 /*Session.Type == GAME_NORMAL || !MPSuperWeaponDisable*/) {
+
 								// If they're spying on a sub pen, give 'em a sonar pulse
 								if (build == STRUCT_SUB_PEN) {
 									House->SuperWeapon[SPC_SONAR_PULSE].Enable(false, true, false);
@@ -710,7 +757,8 @@ void InfantryClass::Per_Cell_Process(PCPType why)
 										if (House->IsHuman) {
 											Sidebar_Glyphx_Add(RTTI_SPECIAL, SPC_SONAR_PULSE, House);
 										}
-									} else {
+									}
+									else {
 										if (IsOwnedByPlayer) {
 											Map.Add(RTTI_SPECIAL, SPC_SONAR_PULSE);
 											Map.Column[1].Flag_To_Redraw();
@@ -718,7 +766,10 @@ void InfantryClass::Per_Cell_Process(PCPType why)
 									}
 								}
 								// If they're spying on an airfield, they get Parabombs
-								if (build == STRUCT_AIRSTRIP) {
+								/*
+								** Kerekupai: house gets parabomb if spying helipads as well (e.g., allies vs allies)
+								*/
+								if (build == STRUCT_AIRSTRIP || build == STRUCT_HELIPAD) {
 									House->SuperWeapon[SPC_PARA_BOMB].Enable(true, true, false);
 									// Add to Glyphx multiplayer sidebar. ST - 8/7/2019 10:13AM
 									if (Session.Type == GAME_GLYPHX_MULTIPLAYER) {
@@ -736,7 +787,8 @@ void InfantryClass::Per_Cell_Process(PCPType why)
 							}
 						}
 
-					} else {
+					}
+					else {
 
 						if (*this == INFANTRY_THIEF) {	// Thief just raided a storage facility
 							tech->House->IsThieved = true;
@@ -753,10 +805,10 @@ void InfantryClass::Per_Cell_Process(PCPType why)
 									if (IsOwnedByPlayer || bldg->IsOwnedByPlayer) Speak(VOX_MONEY_STOLEN);
 #ifdef OBSOLETE
 									long capacity = bldg->Class->Capacity * 256;
-									capacity /= (bldg->House->Tiberium+1);
+									capacity /= (bldg->House->Tiberium + 1);
 									int bldgcap = bldg->Class->Capacity;
 
-									long cash = (bldgcap * 256) / (capacity+1);
+									long cash = (bldgcap * 256) / (capacity + 1);
 									if (cash > (bldgcap / 2)) cash = bldgcap / 2;
 #else
 									long cash = bldg->House->Available_Money() / 2;
@@ -765,18 +817,19 @@ void InfantryClass::Per_Cell_Process(PCPType why)
 									House->Refund_Money(cash);
 								}
 							}
+								}
+							}
 						}
-					}
-				}
 				BEnd(BENCH_PCP);
 				delete this;
 				return;
 
-			} else {
+					}
+			else {
 
-	#ifdef OBSOLETE
+#ifdef OBSOLETE
 				// are we trying to repair a bridge?
-				if (Is_Target_Cell(TarCom) ) {
+				if (Is_Target_Cell(TarCom)) {
 					CELL cell = Coord_Cell(Coord);
 					if (cell == ::As_Cell(NavCom)) {
 						TemplateType tt = cellptr->TType;
@@ -787,11 +840,12 @@ void InfantryClass::Per_Cell_Process(PCPType why)
 						cell -= icon % w;
 						cell -= MAP_CELL_W * (icon / w);
 						if (tt == TEMPLATE_BRIDGE1D || tt == TEMPLATE_BRIDGE2D) {
-							new TemplateClass(TemplateType(cellptr->TType-1), cell);
+							new TemplateClass(TemplateType(cellptr->TType - 1), cell);
 							Map.Zone_Reset(MZONEF_ALL);
 							delete this;
 							return;
-						} else {
+						}
+						else {
 
 							// Trying to repair multi-segment bridge.  Look for the
 							// start tile, then fix it, and determine the direction to
@@ -801,28 +855,28 @@ void InfantryClass::Per_Cell_Process(PCPType why)
 							int ymov = 2;
 							bool valid = false;
 							switch (tt) {
-								case TEMPLATE_BRIDGE_1B:
-								case TEMPLATE_BRIDGE_1C:
-									valid = true;
-									break;
-								case TEMPLATE_BRIDGE_2B:
-								case TEMPLATE_BRIDGE_2C:
-									newtt = TEMPLATE_BRIDGE_2A;
-									xmov = 2;
-									ymov = -1;
-									valid = true;
-									break;
-								case TEMPLATE_BRIDGE_3C:
-								case TEMPLATE_BRIDGE_3D:
-									newtt = TEMPLATE_BRIDGE_3A;
-									valid = true;
-									break;
-								case TEMPLATE_BRIDGE_3E:
-									newtt = TEMPLATE_BRIDGE_3A;
-									xmov = 2;
-									ymov = -1;
-									valid = true;
-									break;
+							case TEMPLATE_BRIDGE_1B:
+							case TEMPLATE_BRIDGE_1C:
+								valid = true;
+								break;
+							case TEMPLATE_BRIDGE_2B:
+							case TEMPLATE_BRIDGE_2C:
+								newtt = TEMPLATE_BRIDGE_2A;
+								xmov = 2;
+								ymov = -1;
+								valid = true;
+								break;
+							case TEMPLATE_BRIDGE_3C:
+							case TEMPLATE_BRIDGE_3D:
+								newtt = TEMPLATE_BRIDGE_3A;
+								valid = true;
+								break;
+							case TEMPLATE_BRIDGE_3E:
+								newtt = TEMPLATE_BRIDGE_3A;
+								xmov = 2;
+								ymov = -1;
+								valid = true;
+								break;
 							}
 
 							// Did we find a valid repairable bridge piece?
@@ -834,22 +888,25 @@ void InfantryClass::Per_Cell_Process(PCPType why)
 									if (xmov < 0) {
 										xmov = -1;
 										ymov = 1;
-									} else {
+									}
+									else {
 										xmov = 1;
 										ymov = -1;
 									}
 									cellptr = &Map[cell];
 									tt = cellptr->TType;
 									if ((tt >= TEMPLATE_BRIDGE_3B && tt <= TEMPLATE_BRIDGE_3F) ||
-										  tt == TEMPLATE_BRIDGE_1B || tt == TEMPLATE_BRIDGE_1C ||
-										  tt == TEMPLATE_BRIDGE_2B || tt == TEMPLATE_BRIDGE_2C ) {
+										tt == TEMPLATE_BRIDGE_1B || tt == TEMPLATE_BRIDGE_1C ||
+										tt == TEMPLATE_BRIDGE_2B || tt == TEMPLATE_BRIDGE_2C) {
 
 										if (tt >= TEMPLATE_BRIDGE_3B) {
 											newtt = TEMPLATE_BRIDGE_3A;
-										} else {
+										}
+										else {
 											if (tt < TEMPLATE_BRIDGE_2A) {
 												newtt = TEMPLATE_BRIDGE_1A;
-											} else {
+											}
+											else {
 												newtt = TEMPLATE_BRIDGE_2A;
 											}
 										}
@@ -859,7 +916,8 @@ void InfantryClass::Per_Cell_Process(PCPType why)
 
 										cell -= icon % w;
 										cell -= MAP_CELL_W * (icon / w);
-									} else {
+									}
+									else {
 										doing = false;
 									}
 								}
@@ -869,19 +927,20 @@ void InfantryClass::Per_Cell_Process(PCPType why)
 							}
 						}
 					}
-				} else {
-	#endif
+				}
+				else {
+#endif
 					if (!Target_Legal(NavCom)) {
 						Enter_Idle_Mode();
 						if (Map[Coord].Cell_Building()) {
 							Scatter(0, true);
 						}
 					}
-	#ifdef OBSOLETE
+#ifdef OBSOLETE
 				}
-	#endif
+#endif
 			}
-		}
+				} // Kerekupai: end of mission capture
 
 		/*
 		**	Infantry entering a transport vehicle will break radio contact
@@ -917,7 +976,8 @@ void InfantryClass::Per_Cell_Process(PCPType why)
 				Scatter(building->Center_Coord(), true, true);	// RUN AWAY!
 				BEnd(BENCH_PCP);
 				return;
-			} else {
+			}
+			else {
 				if (::As_Target(Coord_Cell(Center_Coord())) == NavCom) {
 					Explosion_Damage(Coord, Rule.BridgeStrength, this, WARHEAD_HE);
 
@@ -951,14 +1011,15 @@ void InfantryClass::Per_Cell_Process(PCPType why)
 			Transmit_Message(RADIO_UNLOADED);
 			if (House->ActLike == HOUSE_USSR || House->ActLike == HOUSE_UKRAINE) {
 				Do_Action(DO_GESTURE1);
-			} else  {
+			}
+			else {
 				Do_Action(DO_GESTURE2);
 			}
 
 			/*
 			**	Special voice play.
 			*/
-			if (*this ==  INFANTRY_TANYA) {
+			if (*this == INFANTRY_TANYA) {
 				Sound_Effect(VOC_TANYA_LAUGH, Coord);
 			}
 
@@ -968,7 +1029,7 @@ void InfantryClass::Per_Cell_Process(PCPType why)
 			*/
 			if ((cellptr->Flag.Composite & 0x01F) == 0x01F) {
 				cellptr->Incoming(0, true, true);
-//				cellptr->Incoming(0, true);
+				//				cellptr->Incoming(0, true);
 			}
 		}
 
@@ -1015,26 +1076,27 @@ void InfantryClass::Per_Cell_Process(PCPType why)
 		CELL cell = Coord_Cell(Coord);
 		if (::Distance(Cell_X(cell), Cell_Y(cell), Cell_X(LookCell), Cell_Y(LookCell)) > 1) {
 			Look(false);
-		} else {
+		}
+		else {
 			Look(true);
 		}
 
 #if 1
-/*
-**	If after all is said and done, the unit finishes its move on an impassable cell, then
-**	it must presume that it is in the case of a unit driving onto a bridge that blows up
-**	before the unit completes it's move. In such a case the unit should have been destroyed
-**	anyway, so blow it up now.
-*/
-LandType land = Map[Coord].Land_Type();
-if (!IsDriving && !Class->IsBomber && (land == LAND_ROCK || land == LAND_WATER || land == LAND_RIVER)) {
-	int damage = Strength;
-	Take_Damage(damage, 0, WARHEAD_AP, NULL, true);
-	return;
-}
+		/*
+		**	If after all is said and done, the unit finishes its move on an impassable cell, then
+		**	it must presume that it is in the case of a unit driving onto a bridge that blows up
+		**	before the unit completes it's move. In such a case the unit should have been destroyed
+		**	anyway, so blow it up now.
+		*/
+		LandType land = Map[Coord].Land_Type();
+		if (!IsDriving && !Class->IsBomber && (land == LAND_ROCK || land == LAND_WATER || land == LAND_RIVER)) {
+			int damage = Strength;
+			Take_Damage(damage, 0, WARHEAD_AP, NULL, true);
+			return;
+		}
 #endif
 
-	}
+						} // Kerekupai: end of why == PCP_END
 
 	if (IsActive) {
 		FootClass::Per_Cell_Process(why);
@@ -1176,6 +1238,39 @@ void InfantryClass::Assign_Destination(TARGET target)
 	} else {
 		Path[0] = FACING_NONE;
 	}
+
+	/*
+	** Kerekupai: medics, engineers, thiefs, spies and mechanics do not engage in combat
+	*/ 
+	if ((*this == INFANTRY_MEDIC || *this == INFANTRY_MECHANIC) && As_Object(target) != NULL && House->IsHuman && House->IsPlayerControl) { 
+		if (!House->Is_Ally(As_Object(target)))
+		{
+			target = TARGET_NONE;
+			Assign_Mission(MISSION_GUARD);
+		}
+	}
+	if (Class->IsCapture && !Is_Weapon_Equipped() && As_Object(target) != NULL && House->IsHuman && House->IsPlayerControl){
+		if (!Is_Target_Building(target) && !House->Is_Ally(As_Object(target)))
+		{
+			target = TARGET_NONE;
+		}
+	}
+	/*
+	** Kerekupai: end of medics, engineers, thiefs, spies and mechanics do not engage in combat
+	*/
+	/*
+	** Kerekupai: dogs will not engage if target is vehicle
+	*/ 
+	if (*this == INFANTRY_DOG && As_Object(target) != NULL && House->IsHuman && House->IsPlayerControl) {
+		if (::As_Object(target)->What_Am_I() == RTTI_UNIT && !House->Is_Ally(As_Object(target)))
+		{
+			target = TARGET_NONE;
+		}
+	}
+	/*
+	** Kerekupai: end of dogs will not engage if target is vehicle
+	*/
+
 	FootClass::Assign_Destination(target);
 }
 
@@ -1220,6 +1315,19 @@ void InfantryClass::Assign_Target(TARGET target)
 			Assign_Destination(target);
 		}
 	}
+	
+	/*
+	** Kerekupai: technicians go back to work
+	*/ 
+	if (!Target_Legal(NavCom) && Class->IsCapture && Class->IsCivilian && House->IsHuman){
+		BuildingClass const * building = As_Building(target);
+		if (building != NULL && building->Can_Capture()) {
+			Assign_Destination(target);
+		}
+	}
+	/*
+	** Kerekupai: end of technicians go back to work
+	*/
 }
 
 
@@ -1322,6 +1430,69 @@ void InfantryClass::AI(void)
 	**	Perform movement operations at this time.
 	*/
 	Movement_AI();
+
+	/*
+	** Kerekupai: infantry heals up if a hospital is nearby
+	*/ 
+	if (Strength < Class_Of().MaxStrength) // if hurt
+	{
+		for (int index = 0; index < Buildings.Count(); index++)  // check if hospital nearby
+		{
+			BuildingClass * b = Buildings.Ptr(index);
+
+			if (b != NULL && !b->IsInLimbo &&
+				(b->House == House || b->House->Is_Ally(House) || b->Owner() == HOUSE_NEUTRAL) && // own or ally
+				*b == STRUCT_HOSPITAL &&
+				!IsFiring && !IsProne && !IsStoked && Mission != MISSION_ATTACK &&// not engaged in combat
+				(Mission == MISSION_NONE || Mission == MISSION_GUARD || Mission == MISSION_GUARD_AREA) &&
+				Lepton_To_Cell(::Distance(Coord, b->Center_Coord())) <= 3
+				)
+			{
+				//healing_delay += 0.05;	// healing rate
+				if (Frame % 50 == 0)
+				{
+					Strength += 1;
+					if (Strength > Class_Of().MaxStrength)
+					{
+						Strength = Class_Of().MaxStrength;
+					}
+					//healing_delay = 0.0;	// reset counter
+				}
+				/*if (!House->IsHuman && Health_Ratio() < 1) {
+					Assign_Mission(MISSION_NONE);
+				}
+				else if (!House->IsHuman && Health_Ratio() >= 1) { Assign_Mission(MISSION_GUARD_AREA); }*/
+			}
+
+		}
+	}
+
+	/*
+	** Kerekupai: end of infantry heals up if a hospital is nearby
+	*/
+
+	/*
+	** Kerekupai: infantry approach hospital if injured (soviets)
+	*/
+
+	/*if (Strength > 0 && Health_Ratio() <= Rule.ConditionYellow && !House->IsHuman &&
+		!IsFiring && !IsProne && !IsTethered && Session.Type != GAME_NORMAL &&
+		(Mission == MISSION_GUARD || Mission == MISSION_GUARD_AREA) && MissionQueue == MISSION_NONE &&
+		(House->ActLike == HOUSE_USSR || House->ActLike == HOUSE_BAD || House->ActLike == HOUSE_UKRAINE)) {
+		//BuildingClass * b = House->Find_Building(STRUCT_HOSPITAL);
+		for (int index = 0; index < Buildings.Count(); index++) {
+			BuildingClass * b = Buildings.Ptr(index);
+			if (b && !b->IsInLimbo && b->House->Is_Ally(House) && *b == STRUCT_HOSPITAL) {
+				Assign_Destination(b->As_Target());
+				Assign_Mission(MISSION_MOVE);
+			}
+		}
+		
+	}*/
+
+	/*
+	** Kerekupai: end of infantry approach hospital if injured (soviets)
+	*/
 }
 
 
@@ -1366,9 +1537,16 @@ MoveType InfantryClass::Can_Enter_Cell(CELL cell, FacingType ) const
 	if (cellptr->Overlay != OVERLAY_NONE) {
 		OverlayTypeClass const & otype = OverlayTypeClass::As_Reference(cellptr->Overlay);
 
-		if (otype.IsCrate && !((Session.Type == GAME_NORMAL) ? House->IsPlayerControl : House->IsHuman) && Session.Type == GAME_NORMAL) {
+		/*
+		** Kerekupai: AI can take crates in skirmish
+		*/ 
+		//if (otype.IsCrate && !((Session.Type == GAME_NORMAL) ? House->IsPlayerControl : House->IsHuman) && Session.Type == GAME_NORMAL) {
+		if (otype.IsCrate && Session.Type == GAME_NORMAL && !House->IsHuman) {
 			return(MOVE_NO);
 		}
+		/*
+		** Kerekupai: end of AI can take crates in skirmish
+		*/
 
 		if (otype.IsWall) {
 			if ((cellptr->OverlayData / 16) != otype.DamageLevels) {
@@ -1728,6 +1906,17 @@ FireErrorType InfantryClass::Can_Fire(TARGET target, int which) const
 			}
 		}
 	}
+
+	/*
+	** Kerekupai: FIX medics / mechanics heal friendlies only
+	*/ 
+	if (As_Object(target) != NULL && (*this == INFANTRY_MEDIC || *this == INFANTRY_MECHANIC) && !House->Is_Ally(As_Object(target)))
+	{
+		return(FIRE_ILLEGAL);
+	}
+	/*
+	** Kerekupai: end of FIX medics / mechanics heal friendlies only
+	*/
 
 	return(FootClass::Can_Fire(target, which));
 }
@@ -2456,9 +2645,15 @@ TARGET InfantryClass::Greatest_Threat(ThreatType threat) const
 	**	Special hack to make Tanya not auto-fire if controlled by a
 	**	human player.
 	*/
-	if (*this == INFANTRY_TANYA && House->IsHuman) {
+	/*
+	** Kerekupai: add INFANTRY_GENERAL to the special hack
+	*/
+	if ((*this == INFANTRY_TANYA || *this == INFANTRY_GENERAL) && House->IsHuman) {
 		return(TARGET_NONE);
 	}
+	/*
+	** Kerekupai: end of add INFANTRY_GENERAL to the special hack
+	*/
 
 	if (Class->PrimaryWeapon != NULL) {
 		threat = threat | Class->PrimaryWeapon->Allowed_Threats();
@@ -2554,14 +2749,28 @@ void InfantryClass::Response_Select(void)
 		HousesType house = PlayerPtr->ActLike;
 		switch (Class->Type) {
 			case INFANTRY_GENERAL:
-				if (house != HOUSE_USSR && house != HOUSE_BAD) {
+				/*
+				** Kerekupai: inf general always use stavros voice in skirmish
+				*/
+				if (Session.Type != GAME_NORMAL)
+				{
 					response = _stavros;
 					size = ARRAY_SIZE(_stavros);
-				} else {
-					response = _default_response;
-					size = ARRAY_SIZE(_default_response);
+				}
+				else {
+					if (house != HOUSE_USSR && house != HOUSE_BAD) {
+						response = _stavros;
+						size = ARRAY_SIZE(_stavros);
+					}
+					else {
+						response = _default_response;
+						size = ARRAY_SIZE(_default_response);
+					}
 				}
 				house = HOUSE_USSR;
+				/*
+				** Kerekupai: end of inf general always use stavros voice in skirmish
+				*/
 				break;
 
 			case INFANTRY_DOG:
@@ -2682,14 +2891,28 @@ void InfantryClass::Response_Move(void)
 		HousesType house = PlayerPtr->ActLike;
 		switch (Class->Type) {
 			case INFANTRY_GENERAL:
-				if (house != HOUSE_USSR && house != HOUSE_BAD) {
+				/*
+				** Kerekupai: inf general always use stavros voice in skirmish
+				*/
+				if (Session.Type != GAME_NORMAL)
+				{
 					response = _stavros;
 					size = ARRAY_SIZE(_stavros);
-				} else {
-					response = _default_response;
-					size = ARRAY_SIZE(_default_response);
+				}
+				else {
+					if (house != HOUSE_USSR && house != HOUSE_BAD) {
+						response = _stavros;
+						size = ARRAY_SIZE(_stavros);
+					}
+					else {
+						response = _default_response;
+						size = ARRAY_SIZE(_default_response);
+					}
 				}
 				house = HOUSE_USSR;
+				/*
+				** Kerekupai: end of inf general always use stavros voice in skirmish
+				*/
 				break;
 
 			case INFANTRY_DOG:
@@ -2813,14 +3036,28 @@ void InfantryClass::Response_Attack(void)
 		HousesType house = PlayerPtr->ActLike;
 		switch (Class->Type) {
 			case INFANTRY_GENERAL:
-				if (house != HOUSE_USSR && house != HOUSE_BAD) {
+				/*
+				** Kerekupai: inf general always use stavros voice in skirmish
+				*/
+				if (Session.Type != GAME_NORMAL)
+				{
 					response = _stavros;
 					size = ARRAY_SIZE(_stavros);
-				} else {
-					response = _default_response;
-					size = ARRAY_SIZE(_default_response);
+				}
+				else {
+					if (house != HOUSE_USSR && house != HOUSE_BAD) {
+						response = _stavros;
+						size = ARRAY_SIZE(_stavros);
+					}
+					else {
+						response = _default_response;
+						size = ARRAY_SIZE(_default_response);
+					}
 				}
 				house = HOUSE_USSR;
+				/*
+				** Kerekupai: end of inf general always use stavros voice in skirmish
+				*/
 				break;
 
 			case INFANTRY_DOG:
@@ -2911,6 +3148,23 @@ ActionType InfantryClass::What_Action(ObjectClass const * object) const
 	ActionType action = FootClass::What_Action(object);
 
 	/*
+	** Kerekupai: technicians go back to work
+	*/ 
+	if ((*this == INFANTRY_C1 || *this == INFANTRY_C7) && object->What_Am_I() == RTTI_BUILDING)
+	{
+		BuildingClass const * bldg = (BuildingClass *)object;
+		if (House->Is_Ally(bldg) && House->IsHuman) {
+			return(ACTION_CAPTURE);
+		}
+		else {
+			return(ACTION_ATTACK);
+		}
+	}
+	/*
+	** Kerekupai: technicians go back to work
+	*/
+
+	/*
 	** If this is an engineer/renovator, we have to make some adjustments.
 	** If the cursor is over an enemy building, return action-none.  If it's
 	** over a friendly building, we have to return action-capture so he can
@@ -2919,29 +3173,31 @@ ActionType InfantryClass::What_Action(ObjectClass const * object) const
 	*/
 	if (*this == INFANTRY_RENOVATOR && object->What_Am_I() == RTTI_BUILDING && House->IsPlayerControl) {
 		BuildingClass const * bldg = (BuildingClass *)object;
+
 		if (bldg->Class->IsRepairable) {
 			if (House->Is_Ally(bldg)) {
 				if (bldg->Health_Ratio() == 1) {
 					return(ACTION_NO_GREPAIR);
 				}
 				return(ACTION_GREPAIR);
-			} else {
+			}
+			else {
 
 				if (bldg->Can_Capture()) {
 #ifdef FIXIT_ENGINEER	//	checked - ajw 9/28/98
-					if (bldg->Health_Ratio() <= EngineerCaptureLevel) {
+					if (bldg->Health_Ratio() <= fixed::fixed(float(1.0))){ // Kerekupai: engineer instant capture // EngineerCaptureLevel) {
 #else
 					if (bldg->Health_Ratio() <= Rule.ConditionRed) {
 #endif
 						return(ACTION_CAPTURE);
 					}
 					return(ACTION_DAMAGE);
-				}
+					}
 
-//				if (bldg->Health_Ratio() <= Rule.ConditionRed && bldg->Can_Capture()) {
+				//				if (bldg->Health_Ratio() <= Rule.ConditionRed && bldg->Can_Capture()) {
+				}
 			}
 		}
-	}
 
 	/*
 	** If this is a medic, and the cursor's over a friendly infantryman,
@@ -3293,11 +3549,28 @@ int InfantryClass::Mission_Attack(void)
 		return(1);
 	}
 
-	if (Class->IsCapture && As_Building(TarCom) != NULL && As_Building(TarCom)->Can_Capture()) {
+	/*
+	** Kerekupai: technicians go back to work
+	*/ 
+	if (Class->IsCivilian && (*this == INFANTRY_C1 || *this == INFANTRY_C7) &&
+		House->IsHuman && As_Building(TarCom) != NULL &&
+		As_Building(TarCom)->House == this->House //&&
+		//As_Building(TarCom)->Can_Capture())
+		)
+	{
 		Assign_Destination(TarCom);
 		Assign_Mission(MISSION_CAPTURE);
 		return(1);
 	}
+	// Kerekupai: added the not technician flag!
+	if (Class->IsCapture && As_Building(TarCom) != NULL && As_Building(TarCom)->Can_Capture() && !Class->IsCivilian) {
+		Assign_Destination(TarCom);
+		Assign_Mission(MISSION_CAPTURE);
+		return(1);
+	}
+	/*
+	** Kerekupai: end of technicians go back to work
+	*/
 
 	return(FootClass::Mission_Attack());
 }
@@ -3740,9 +4013,16 @@ void InfantryClass::Firing_AI(void)
 							if( (targ->What_Am_I() == RTTI_INFANTRY && *this == INFANTRY_MEDIC) ||
 								 (*this == INFANTRY_MECHANIC && (targ->What_Am_I() == RTTI_AIRCRAFT || targ->What_Am_I() == RTTI_UNIT )) ) {
 
-									if (targ->Health_Ratio() >= Rule.ConditionGreen) {
+									/*
+									** Kerekupai: FIX medics / mechanics only heal friendly units
+									*/ 
+									//if (targ->Health_Ratio() >= Rule.ConditionGreen) {
+									if (targ->Health_Ratio() >= Rule.ConditionGreen || !House->Is_Ally(As_Object(TarCom))) {
 										Assign_Target(TARGET_NONE);
 									}
+									/*
+									** Kerekupai: end of FIX medics / mechanics only heal friendly units
+									*/
 							}
 						} else {
 							Assign_Target(TARGET_NONE);
@@ -3951,6 +4231,15 @@ void InfantryClass::Doing_AI(void)
  *=============================================================================================*/
 void InfantryClass::Movement_AI(void)
 {
+
+	/*
+	** Kerekupai: engineer fix
+	*/ 
+	if (!IsActive || IsInLimbo) return;
+	/*
+	** Kerekupai: end of engineer fix
+	*/
+
 	/*
 	**	Special hack check to ensure that infantry will never get stuck in a movement order if
 	**	there is no place to go.
@@ -4169,7 +4458,6 @@ void InfantryClass::Movement_AI(void)
 			*/
 			Mark(MARK_UP);
 			if (Distance(Head_To_Coord()) < 0x0010) {
-
 				memcpy(&Path[0], &Path[1], sizeof(Path)-sizeof(Path[0]));
 				Path[(sizeof(Path)/sizeof(Path[0]))-1] = FACING_NONE;
 				Coord = Head_To_Coord();

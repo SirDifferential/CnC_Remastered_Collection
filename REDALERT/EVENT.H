@@ -96,7 +96,14 @@ class EventClass
 			PROPOSE_DRAW,		//	Players proposes that 2-player game be called a stalemate.
 			RETRACT_DRAW,		//	Player retracts proposed draw offer.
 #endif
-
+			/*
+			** Kerekupai: CFE PATCH REDUX MOD RALLY POINT
+			*/
+			//CFE Patch events
+			SET_RALLY,
+			/*
+			** Kerekupai: end CFE PATCH REDUX MOD RALLY POINT
+			*/
 			LAST_EVENT,			// one past the last event
 		} EventType;
 

@@ -80,6 +80,15 @@
 
 #include	"function.h"
 
+/*
+** Kerekupai: get key input status
+*/ 
+//Added for getting the input for special character keys from the client 
+// - 6/26/2019 JAS 
+extern bool DLL_Export_Get_Input_Key_State(KeyNumType key);
+/*
+** Kerekupai: end of get key input status
+*/
 
 /***********************************************************************************************
  * FootClass::FootClass -- Default constructor for foot class objects.                         *
@@ -132,6 +141,12 @@ FootClass::FootClass(RTTIType rtti, int id, HousesType house) :
 	for (int index = 0; index < ARRAY_SIZE(NavQueue); index++) {
 		NavQueue[index] = TARGET_NONE;
 	}
+
+	/*
+	** Kerekupai: attack move
+	** initialization
+	*/
+	attack_move = false;
 }
 
 
@@ -491,14 +506,42 @@ int FootClass::Mission_Move(void)
 {
 	assert(IsActive);
 
+	/*
+	** Kerekupai: attack move (initialization)
+	*/
+	if (!Target_Legal(NavCom) && MissionQueue == MISSION_NONE) {
+		attack_move = false;
+	}
+	/*
+	** Kerekupai: end of attack move (initialization)
+	*/
+
 	if (!Target_Legal(NavCom) && !IsDriving && MissionQueue == MISSION_NONE) {
 		Enter_Idle_Mode();
+		
+		attack_move = false;
 		return(1);
 	}
+
 //	if (!Target_Legal(TarCom) && !House->IsPlayerControl && !House->IsHuman) {
 	if (!Target_Legal(TarCom) && !House->IsPlayerControl && !House->IsHuman && (!Team.Is_Valid() || !Team->Class->IsSuicide)) {
 		Target_Something_Nearby(THREAT_RANGE);
 	}
+
+	/*
+	** Kerekupai: attack move, main routine
+	*/ 
+	bool shiftdown = DLL_Export_Get_Input_Key_State(KN_LSHIFT);
+	if (shiftdown && !attack_move && House->IsHuman && House->IsPlayerControl) {
+		attack_move = true;
+	}
+	if (House->IsHuman && House->IsPlayerControl && !Target_Legal(TarCom) && attack_move && (!Team.Is_Valid() || !Team->Class->IsSuicide)) {
+		Target_Something_Nearby(THREAT_RANGE);
+	}
+	/*
+	** Kerekupai: attack move, main routine
+	*/
+
 	return(MissionControl[Mission].Normal_Delay() + Random_Pick(0, 2));
 }
 
@@ -523,6 +566,17 @@ int FootClass::Mission_Move(void)
 int FootClass::Mission_Capture(void)
 {
 	assert(IsActive);
+
+	/*
+	** Kerekupai:: technicians go back to work
+	*/
+	if (Is_Target_Building(TarCom) && !Target_Legal(NavCom) && What_Am_I() == RTTI_INFANTRY && ((InfantryClass *)this)->Class->IsCivilian &&
+		((InfantryClass *)this)->Class->IsCapture && House->IsHuman) {
+		Assign_Destination(TarCom);
+	}
+	/*
+	** Kerekupai:: end of technicians go back to work
+	*/
 
 	/*
 	**	If there is a valid TarCom but the NavCom isn't set, then set the NavCom accordingly.
@@ -695,15 +749,28 @@ int FootClass::Mission_Hunt(void)
 #endif
 #endif
 		Random_Animate();
-	} else {
-		if (What_Am_I() == RTTI_INFANTRY && ( ((InfantryTypeClass const &)Class_Of()).Type == INFANTRY_RENOVATOR || ((InfantryTypeClass const &)Class_Of()).Type == INFANTRY_THIEF) ) {
-			Assign_Destination(TarCom);
-			Assign_Mission(MISSION_CAPTURE);
-		} else {
+	}
+	else {
+		/*
+		** Kerekupai: spy and thief hunt buildings
+		*/ 
+		if (What_Am_I() == RTTI_INFANTRY && (((InfantryTypeClass const &)Class_Of()).Type == INFANTRY_RENOVATOR || 
+			((InfantryTypeClass const &)Class_Of()).Type == INFANTRY_THIEF || ((InfantryTypeClass const &)Class_Of()).Type == INFANTRY_SPY)) {
+			if (Is_Target_Building(TarCom) && As_Object(TarCom)->Can_Capture())
+			{
+				Assign_Destination(TarCom);
+				Assign_Mission(MISSION_CAPTURE);
+			}
+			else {
+				Assign_Mission(MISSION_NONE);
+			}
+		}
+		else {
 			if (What_Am_I() == RTTI_INFANTRY && ((InfantryClass *)this)->Class->IsBomber && Is_Target_Building(TarCom)) {
 				Assign_Destination(TarCom);
 				Assign_Mission(MISSION_SABOTAGE);
-			} else {
+			}
+			else {
 				Approach_Target();
 			}
 		}
@@ -987,6 +1054,43 @@ int FootClass::Mission_Guard_Area(void)
 	assert(IsActive);
 
 	/*
+	** Kerekupai: transport vehicles / aircraft load up infantry units (as for RA)
+	*/
+	if (What_Am_I() == RTTI_AIRCRAFT && *((AircraftClass *)this) == AIRCRAFT_TRANSPORT &&
+		Session.Type != GAME_NORMAL && ((AircraftClass *)this)->Height == 0) {
+		if (!In_Radio_Contact() &&
+			House->Which_Zone(this) != ZONE_NONE &&
+			!House->IsHuman) {
+
+			int needed = ((AircraftClass *)this)->Class->Max_Passengers() - How_Many();
+
+			for (int index = 0; index < Infantry.Count(); index++) {
+				if (needed == 0) break;
+
+				InfantryClass * infantry = Infantry.Ptr(index);
+
+				if (infantry != NULL &&
+					infantry->IsActive &&
+					!infantry->IsInLimbo &&
+					infantry->Strength > 0 &&
+					infantry->House == House &&
+					!Target_Legal(infantry->TarCom) &&
+					!Target_Legal(infantry->NavCom) &&
+					Distance(infantry) < 10 * CELL_LEPTON_W &&
+					(infantry->Mission == MISSION_GUARD || infantry->Mission == MISSION_GUARD_AREA || infantry->Mission == MISSION_NONE)) {
+
+					infantry->Assign_Mission(MISSION_ENTER);
+					infantry->ArchiveTarget = As_Target();
+					needed--;
+				}
+			}
+		}
+	}
+	/*
+	** Kerekupai: end of transport vehicles / aircraft load up infantry units (as for RA)
+	*/
+
+	/*
 	**	If this unit is on an impassable cell for any reason, it needs to scatter immediately
 	*/
 	if (What_Am_I() == RTTI_INFANTRY || What_Am_I() == RTTI_UNIT) {
@@ -1036,9 +1140,9 @@ int FootClass::Mission_Guard_Area(void)
 	**	Make sure that the unit has not strayed too far from the home position.
 	**	If it has, then race back to it.
 	*/
-	int maxrange = Threat_Range(1)/2;
-
-	if (!IsFiring && !Target_Legal(NavCom) && Distance(ArchiveTarget) > maxrange) {
+	int maxrange = Threat_Range(1) / 2;
+	
+	if (!IsFiring && (!Target_Legal(NavCom) && Distance(ArchiveTarget) > maxrange)) {
 		Assign_Target(TARGET_NONE);
 		Assign_Destination(ArchiveTarget);
 	}
@@ -1052,9 +1156,21 @@ int FootClass::Mission_Guard_Area(void)
 			return(1);
 		}
 		Random_Animate();
-	} else {
+	}
+	else {
 		Approach_Target();
 	}
+
+	/*
+	** Kerekupai: make the unit return to its spot if it has already run long way and the target is not in range
+	*/
+	if ((House->IsHuman || Session.Type != GAME_NORMAL) && Target_Legal(TarCom) && !In_Range(TarCom) && Distance(ArchiveTarget) > maxrange) {
+		Assign_Target(TARGET_NONE);
+		Assign_Destination(ArchiveTarget);
+	}
+	/*
+	** Kerekupai: end of make the unit return to its spot if it has already run long way and the target is not in range
+	*/
 
 	int dtime = MissionControl[Mission].Normal_Delay();
 	if (What_Am_I() == RTTI_AIRCRAFT) {

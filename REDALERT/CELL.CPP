@@ -2283,11 +2283,14 @@ bool CellClass::Goodie_Check(FootClass * object)
 				case CRATE_ICBM:
 				case CRATE_PARA_BOMB:
 				case CRATE_SONAR:
-					if (Session.Type != GAME_NORMAL) {
+					/*
+					** Kerekupai: superweapons disable only affects nuke, iron curtain, gps and chrono
+					*/
+					/*if (Session.Type != GAME_NORMAL) {
 						if (MPSuperWeaponDisable) {
 							powerup = CRATE_MONEY;
 						}
-					}
+					}*/
 					break;
 
 				case CRATE_TIMEQUAKE:

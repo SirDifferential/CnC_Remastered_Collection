@@ -56,6 +56,13 @@ class BuildingClass : public TechnoClass
 {
 	public:
 
+		// Kerekupai: spies jamm radar and cut power
+		// to control the time building gets jammed
+		//bool jammed_by_spy;
+
+		// Kerekupai: oil cash
+		int OilCash;
+
 		/*
 		**	This points to the control data that gives this building its characteristics.
 		*/
@@ -208,6 +215,15 @@ class BuildingClass : public TechnoClass
 		*/
 		CDTimerClass<FrameTimerClass> PlacementDelay;
 
+		/*
+		** Kerekupai: CFE PATCH REDUX MOD RALLY POINT
+		*/
+		TARGET RallyPoint;
+		TARGET Target_For_Rally_Point(const SpeedType speed = SPEED_TRACK) const;
+		/*
+		** Kerekupai: end CFE PATCH REDUX MOD RALLY POINT
+		*/
+
 		/*---------------------------------------------------------------------
 		**	Constructors, Destructors, and overloaded operators.
 		*/
@@ -253,6 +269,12 @@ class BuildingClass : public TechnoClass
 		int Shape_Number(void) const;
 		int Power_Output(void) const;
 		CELL Check_Point(CheckPointType cp) const;
+
+		/*
+		** Kerekupai: update and report the healing status
+		*/
+		void update_healing_state(bool state);
+		bool get_healing_state();
 
 		/*
 		**	Coordinate inquiry functions. These are used for both display and
@@ -348,8 +370,32 @@ class BuildingClass : public TechnoClass
 
 		virtual unsigned Spied_By() const;
 
+		/*
+		** Kerekupai: CFE PATCH REDUX MOD RALLY POINT
+		*/
+		bool Can_Have_Rally_Point() const;
+		virtual void Set_Unselected_By_Player(HouseClass* player = nullptr) override;
+
+		bool Rally_Unit(TechnoClass& unit);
+		/*
+		** Kerekupai: end CFE PATCH REDUX MOD RALLY POINT
+		*/
+
 	private:
 		void Drop_Debris(TARGET source = TARGET_NONE);
+
+		/*
+		** Kerekupai: healing status of hospitals
+		*/
+		bool is_healing;
+
+		/*
+		** Kerekupai: CFE PATCH MOD RALLY POINT
+		*/
+		void  Player_Set_Rally_Point(TARGET target);
+		/*
+		** Kerekupai: end CFE PATCH MOD RALLY POINT
+		*/
 
 		/*
 		** Some additional padding in case we need to add data to the class and maintain backwards compatibility for save/load

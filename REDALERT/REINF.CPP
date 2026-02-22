@@ -213,7 +213,11 @@ static FootClass * _Create_Group(TeamTypeClass const * teamtype)
 				/*
 				**	Build the list of transporters and passengers.
 				*/
-				if (tclass->Max_Passengers() > 0) {
+				
+				/*
+				** Kerekupai: fix to transport vessels not delivering jeep cargo
+				*/
+				if (tclass->Max_Passengers() > 0 && *(UnitClass *)temp != UNIT_JEEP) {
 
 					/*
 					**	Link to the list of transports.

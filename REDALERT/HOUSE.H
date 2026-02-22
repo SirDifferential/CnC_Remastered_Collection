@@ -426,6 +426,15 @@ class HouseClass {
 		long Capacity;
 
 		/*
+		** Kerekupai: playing with friends?
+		*/
+		bool gaming_with_friends;
+		short n_human_players;
+		/*
+		** Kerekupai: end of playing with friends?
+		*/
+
+		/*
 		** Stuff to keep track of the total number of units built by this house.
 		*/
 		UnitTrackerClass * AircraftTotals;
@@ -650,6 +659,15 @@ class HouseClass {
 		~HouseClass(void);
 		operator HousesType(void) const;
 
+		/*
+		** Kerekupai: functions to set / get gaming_with_friends variable
+		*/
+		bool get_gaming_with_friends() { return gaming_with_friends; }
+		void set_gaming_with_friends(bool new_value) { gaming_with_friends = new_value; }
+		/*
+		** Kerekupai: end of functions to set / get gaming_with_friends variable
+		*/
+
 		/*---------------------------------------------------------------------
 		**	Member function prototypes.
 		*/
@@ -766,6 +784,13 @@ class HouseClass {
 		bool AI_Raise_Power(UrgencyType urgency) const;
 		bool AI_Lower_Power(UrgencyType urgency) const;
 
+		//Kerekupai AI Haversters from #MinorAIFixes
+		virtual void AI_Harvesters(void);
+		int HarvesterTimeCheck = 0;
+		/*
+		** Kerekupai: end of AI Haversters from #MinorAIFixes 
+		*/
+
 		bool Can_Make_Money(void) const {
 			return(Available_Money() > 300 || (BScan & STRUCTF_REFINERY));
 		};
@@ -834,6 +859,17 @@ class HouseClass {
 		void Blowup_All(void);
 
 		/*
+		** Kerekupai: Ai sell some structures to get cash
+		**			  return true if a structure was sold
+		*/ 
+		bool Sell_Some_Structures();
+		/*
+		** Kerekupai: AI uncloak everything
+		**			  Called at end game
+		*/ 
+		bool Do_Uncloak_All();
+
+		/*
 		** This routine gets called in multiplayer games when every unit, building,
 		** and infantry for a house is destroyed.
 		*/
@@ -845,6 +881,11 @@ class HouseClass {
 		void Tally_Score(void);
 
 		friend class MapEditClass;
+
+		/*
+		** pchote - "Modern Wall Building" mod.
+		*/
+		bool Extend_Wall(OverlayTypeClass const& wall, HousesType house, CELL cell, DirType dir, int step);
 
 	private:
 		void Silo_Redraw_Check(long oldtib, long oldcap);

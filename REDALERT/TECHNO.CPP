@@ -142,6 +142,13 @@
 // - 6/26/2019 JAS 
 extern bool DLL_Export_Get_Input_Key_State(KeyNumType key);
 
+/*
+** Kerekupai: import for the drawing of veterancy icons
+*/  
+extern void DLL_Draw_Intercept(int shape_number, int x, int y, int width, int height
+							  ,int flags, const ObjectClass *object, DirType rotation
+							  ,long scale, const char *shape_file_name, char override_owner);
+
 
 /***************************************************************************
 **	These are the pointers to the special shape data that the units may need.
@@ -371,7 +378,8 @@ int TechnoClass::What_Weapon_Should_I_Use(TARGET target) const
 	if (In_Range(target, 1)) w2 *= 2;
 	ok = Can_Fire(target, 1);
 	if (ok == FIRE_CANT || ok == FIRE_ILLEGAL) w2 = 0;
-
+	
+	
 	/*
 	**	Return with the weapon identifier that should be used to fire upon the
 	**	candidate target.
@@ -645,6 +653,27 @@ TechnoClass::TechnoClass(RTTIType rtti, int id, HousesType house) :
 	ElectricZapWhich(0),
 	PurchasePrice(0)
 {
+	/*
+	** Kerekupai: unit gain veterancy
+	**			 variable initialization
+	*/ 
+	Armor_levup = fixed::fixed(float(1.0));
+	Fpower_levup = fixed::fixed(float(1.0));
+	ROF_levup = fixed::fixed(float(1.0)); // rate of fire
+	veterancy_level = 1;
+	/*
+	** Kerekupai: end of unit gain veterancy
+	*/
+
+	/*
+	** Kerekupai: playing with friends?	variable initialization
+	*/
+	//gaming_with_friends = false;
+	//n_human_players = 0;
+	/*
+	** Kerekupai: end of playing with friends
+	*/
+
 	//IsOwnedByPlayer = (PlayerPtr == House);
 	// Added for multiplayer changes. ST - 4/24/2019 10:40AM
 	IsDiscoveredByPlayerMask = 0;
@@ -1096,7 +1125,7 @@ void TechnoClass::Per_Cell_Process(PCPType why)
 void TechnoClass::Draw_It(int x, int y, WindowNumberType window) const
 {
 	assert(IsActive);
-
+	
 	/*
 	**	Tells the door logic that it has been drawn.
 	*/
@@ -1214,6 +1243,118 @@ void TechnoClass::Draw_It(int x, int y, WindowNumberType window) const
 	{
 		Draw_Pips((x-lx)+5, y+ly-3, window);
 	}
+
+	/*
+	** Kerekupai: playing with friends
+	**			  if there are more than one human player in the session,
+	**			  then always draw the icons
+	*/
+
+	//HouseClass * house;
+
+	if (Session.Type != GAME_NORMAL && House->n_human_players < 0)
+	{
+		House->n_human_players = 0;
+		for (HousesType index = HOUSE_FIRST; index < HOUSE_COUNT; index++) {
+			HouseClass * house = HouseClass::As_Pointer(index);
+			//house = HouseClass::As_Pointer(index);
+			if (house && house->IsHuman) { House->n_human_players++; }
+		}
+	}
+	if (House->n_human_players > 1) { House->set_gaming_with_friends(true); }
+
+	bool gaming_with_friends = House->get_gaming_with_friends();
+	/*
+	** Kerekupai: end of playing with friends
+	*/
+	
+
+	/*
+	** Kerekupai: draw veterancy icon (lower right corner)
+	*/
+	selected = Is_Selected_By_Player();
+	if (veterancy_level > 1 && window == WINDOW_VIRTUAL && ((selected && House->Is_Ally(PlayerPtr)) || gaming_with_friends)){
+
+		int w = 2;
+		int h = 3;
+		int iconx = x + lx - 3; // origin, reference coordinate
+		int icony = y + ly - 4;
+		int icon_shape = array_vet_icons[0];
+
+		// adjust y coord to avoid overlap with ammo / pip icons
+		if (Class_Of().Max_Pips() + Techno_Type_Class()->MaxAmmo >= 5) {
+			icony -= 4;
+		}
+
+		for (int i = 0; i < (veterancy_level - 1); i++) {
+			// draw icon
+			icon_shape = array_vet_icons[i];
+			DLL_Draw_Intercept(icon_shape, iconx, icony, w, h, SHAPE_WIN_REL | SHAPE_CENTER, this, DIR_N, 0x0100, "VET_ICONS", HOUSE_NONE);
+			icony -= 1;
+		}
+	}
+	/*
+	** Kerekupai: end of draw veterancy icon
+	*/
+
+	/*
+	** Kerekupai: draw icon indicating the owner of the oil derrick
+	*/
+	if ((selected || gaming_with_friends) && What_Am_I() == RTTI_BUILDING && *((BuildingClass *)this) == STRUCT_PUMP && window == WINDOW_VIRTUAL) {
+		int w = 7;
+		int h = 10;
+		int iconx = x - width / 3; // origin, reference coordinate
+		int icony = y + width / 3;
+		int icon_shape = 1; // oil_derrick_neutral
+
+		if (Owner() != HOUSE_NEUTRAL && /*Owner() != HOUSE_NONE &&*/ !House->Is_Ally(PlayerPtr) && (Session.Type == GAME_NORMAL || Owner() >= HOUSE_MULTI1))
+			icon_shape = 2; // oil derrick enemy
+		if (House->Is_Ally(PlayerPtr))
+			icon_shape = 3; // oil_derrick_player
+
+		// draw the icon
+		DLL_Draw_Intercept(icon_shape, iconx, icony, w, h, SHAPE_WIN_REL | SHAPE_CENTER, this, DIR_N, 0x0100, "ODICON", HOUSE_NONE);
+	}
+	/*
+	** Kerekupai: end of draw icon indicating the owner of the oil derrick
+	*/
+
+	/*
+	** Kerekupai: draw icon indicating healing state of hospitals
+	*/
+	if (What_Am_I() == RTTI_BUILDING && *((BuildingClass *)this) == STRUCT_HOSPITAL && (House->Is_Ally(PlayerPtr) || gaming_with_friends) &&
+		((BuildingClass *)this)->get_healing_state() == true && window == WINDOW_VIRTUAL) {
+		int w = 10;
+		int h = 10;
+		int iconx = x - width / 3; // origin, reference coordinate
+		int icony = y + width / 5;
+		int icon_shape = 1;
+
+		// draw the icon
+		DLL_Draw_Intercept(icon_shape, iconx, icony, w, h, SHAPE_WIN_REL | SHAPE_CENTER, this, DIR_N, 0x0100, "HOSPITALHEALING", HOUSE_NONE);
+	}
+	/*
+	** Kerekupai: end of draw icon indicating healing state of hospitals
+	*/
+
+	/*
+	** Kerekupai: draw guard mode icon (upper left corner)
+	*/
+	selected = Is_Selected_By_Player();
+	if (Mission == MISSION_GUARD_AREA && What_Am_I() != RTTI_BUILDING && window == WINDOW_VIRTUAL && ((selected && House->Is_Ally(PlayerPtr)) || gaming_with_friends)) {
+
+		int w = 5;
+		int h = 4;
+		int iconx = x + lx - (width / 2);// lx + 1; // origin, reference coordinate
+		int icony = y + ly + 1;
+		int icon_shape = 1;
+
+		// draw icon
+		DLL_Draw_Intercept(icon_shape, iconx, icony, w, h, SHAPE_WIN_REL | SHAPE_CENTER, this, DIR_N, 0x0100, "GUARDMODE", HOUSE_NONE);
+	}
+	/*
+	** Kerekupai: end of draw guard mode icon
+	*/
 }
 
 
@@ -1592,6 +1733,14 @@ bool TechnoClass::Evaluate_Object(ThreatType method, int mask, int range, Techno
 		BEnd(BENCH_EVAL_OBJECT);
 		return(false);
 	}
+	/*
+	** Kerekupai: not visible units are not valid targets for human players
+	*/
+	if(!object->IsOwnedByPlayer /*&& !object->IsDiscoveredByPlayer*/ && House->IsHuman && !Map[Coord_Cell(object->Center_Coord())].Is_Mapped(House))
+		return(false);
+	/*
+	** Kerekupai: end of not visible units are not valid targets for human players
+	*/
 
 	/*
 	**	Quickly eliminate all unit types that are not allowed according to the mask
@@ -2540,6 +2689,25 @@ void TechnoClass::AI(void)
 			ElectricZapWhich = 0;
 		}
 	}
+
+	/*
+	** Kerekupai: playing with friends
+	**			  if there are more than one human player in the session,
+	**			  then transport helis always land
+	*/
+	/*if (Session.Type != GAME_NORMAL && n_human_players < 1)
+	{
+		HouseClass * house;
+
+		for (HousesType index = HOUSE_FIRST; index < HOUSE_COUNT; index++) {
+			house = HouseClass::As_Pointer(index);
+			if (house && house->IsHuman) { n_human_players++; }
+		}
+		if (n_human_players > 1) { gaming_with_friends = true; }
+	}*/
+	/*
+	** Kerekupai: end of playing with friends
+	*/
 }
 
 
@@ -2973,6 +3141,24 @@ void TechnoClass::Assign_Target(TARGET target)
 	}
 
 	/*
+	** Kerekupai: AI skip civilian structures in multiplayer
+	**			  Does not affect the engineer
+	*/
+	bool can_engage = false;
+	if (What_Am_I() == RTTI_INFANTRY && *(InfantryClass *)this == INFANTRY_RENOVATOR)
+		can_engage = true;
+
+	BuildingClass * obj = As_Building(target);
+
+	if (Session.Type != GAME_NORMAL && !House->IsHuman && !can_engage &&
+		obj != NULL && !obj->Techno_Type_Class()->IsRemappable && obj->Owner() < HOUSE_MULTI1){
+		target = TARGET_NONE;
+	}
+	/*
+	** Kerekupai: end of AI skip civilian structures in multiplayer
+	*/
+
+	/*
 	**	Set the unit's targeting computer.
 	*/
 	TarCom = target;
@@ -3007,7 +3193,11 @@ int TechnoClass::Rearm_Delay(bool second, int which) const
 
 	WeaponTypeClass const * weapon = (which == 0) ? Techno_Type_Class()->PrimaryWeapon : Techno_Type_Class()->SecondaryWeapon;
 	if (second && weapon != NULL) {
-		return(weapon->ROF * House->ROFBias);
+		/*
+		** Kerekupai: Unit gain experience, rate of fire ROF
+		*/ 
+		//return(weapon->ROF * House->ROFBias);
+		return(weapon->ROF * House->ROFBias * ROF_levup);
 	}
 	return(3);
 }
@@ -3232,7 +3422,11 @@ BulletClass * TechnoClass::Fire_At(TARGET target, int which)
 	*/
 	int firepower = weapon->Attack;
 	if (firepower > 0) {
-		firepower = weapon->Attack * FirepowerBias * House->FirepowerBias;
+		/*
+		** Kerekupai: unit gain experience, fire power
+		*/ 
+		//firepower = weapon->Attack * FirepowerBias * House->FirepowerBias;
+		firepower = weapon->Attack * FirepowerBias * House->FirepowerBias * Fpower_levup;
 	}
 
 
@@ -3373,7 +3567,10 @@ BulletClass * TechnoClass::Fire_At(TARGET target, int which)
 			HouseClass *player = HouseClass::As_Pointer(tgt_owner);
 			if ((player != NULL) && player->IsHuman) {
 				if ((!Is_Owned_By_Player(player) && !Is_Discovered_By_Player(player)) || (!Map[Coord_Cell(Center_Coord())].Is_Mapped(House) && (What_Am_I()!=RTTI_AIRCRAFT || !Is_Owned_By_Player(player))) ) {
-					Map.Sight_From(Coord_Cell(Center_Coord()), 1, player, false);
+					/*
+					** Kerekupai: dont reveal units hidden in the darkness
+					*/
+					//Map.Sight_From(Coord_Cell(Center_Coord()), 1, player, false);
 				}
 			}
 		}
@@ -3956,6 +4153,22 @@ bool TechnoClass::Captured(HouseClass * newowner)
 		switch (What_Am_I()) {
 			case RTTI_BUILDING:
 				newowner->BuildingsKilled[Owner()]++;
+				/*
+				** Kerekupai: AI skirmish sells captured buildings that are not factories
+				*/ 
+				if (Session.Type != GAME_NORMAL && !newowner->IsHuman &&
+					(*(BuildingClass *)this != STRUCT_BARRACKS &&
+					 *(BuildingClass *)this != STRUCT_TENT &&
+					 *(BuildingClass *)this != STRUCT_WEAP &&
+					 *(BuildingClass *)this != STRUCT_PUMP
+					)
+				   )
+				{
+					((BuildingClass *)this)->Sell_Back(1);
+				}
+				/*
+				** Kerekupai: end of AI skirmish sells captured buildings that are not factories
+				*/
 				break;
 
 			case RTTI_AIRCRAFT:
@@ -4014,7 +4227,11 @@ ResultType TechnoClass::Take_Damage(int & damage, int distance, WarheadType warh
 	**	value.
 	*/
 	if (!forced && damage > 0) {
-		damage = damage * ArmorBias * House->ArmorBias;
+		/*
+		** Kerekupai: unit gain experience, armor
+		*/ 
+		//damage = damage * ArmorBias * House->ArmorBias;
+		damage = damage * ArmorBias * House->ArmorBias * Armor_levup;
 	}
 
 	if (IronCurtainCountDown == 0) {
@@ -4119,6 +4336,28 @@ void TechnoClass::Record_The_Kill(TechnoClass * source)
 	int points = Techno_Type_Class()->Points;
 
 	/*
+	** Kerekupai: "source" can gain veterancy if it is infantry, rtti_unit or aircraft, and if
+	**			  there is no friendly fire
+	*/ 
+	
+	/*
+	** Kerekupai: declare / define some variables
+	*/
+	fixed factor = fixed::fixed(float(0.13)); // veterancy scaling factor
+	short rn; // random number
+	int unit_cost = 0;
+	bool can_gain_veterancy = true;
+	double p = 0.0;
+
+	InfantryClass * inf;
+	UnitClass * u;
+	VesselClass * v;
+	AircraftClass * a;
+	/*
+	** Kerekupai: end of declaring / defining some variables
+	*/
+
+	/*
 	**	Handle any trigger event associated with this object.
 	*/
 	if (Trigger.Is_Valid() && source) Trigger->Spring(TEVENT_ATTACKED, this);
@@ -4173,6 +4412,7 @@ void TechnoClass::Record_The_Kill(TechnoClass * source)
 			break;
 
 		case RTTI_AIRCRAFT:
+
 			if (source != NULL && Session.Type == GAME_INTERNET) {
 				source->House->DestroyedAircraft->Increment_Unit_Total( ((AircraftClass*)this)->Class->Type );
 				total_recorded++;
@@ -4182,6 +4422,8 @@ void TechnoClass::Record_The_Kill(TechnoClass * source)
 			if (source != NULL && !total_recorded && Session.Type == GAME_INTERNET) {
 				source->House->DestroyedInfantry->Increment_Unit_Total( ((InfantryClass*)this)->Class->Type );
 				total_recorded++;
+
+				
 			}
 			//Fall through.....
 		case RTTI_UNIT:
@@ -4215,6 +4457,243 @@ void TechnoClass::Record_The_Kill(TechnoClass * source)
 	** Since we lost an object, we lose the associated points as well.
 	*/
 	House->PointTotal -= points;
+
+	/*
+	** Kerekupai: the source object gains veterancy
+	** can gain veterancy if not civilian building or wall (hence, if not remappable)
+	*/ 
+	
+	if (What_Am_I() == RTTI_BUILDING && !Techno_Type_Class()->IsRemappable)
+	{
+		can_gain_veterancy = false;
+	}
+	
+	if (source != NULL && !source->IsALoaner && !source->IsInLimbo &&source->Strength > 0 && can_gain_veterancy)
+	{
+			can_gain_veterancy = false;
+
+			switch (source->What_Am_I()) {
+			case RTTI_AIRCRAFT:
+				a = (AircraftClass *)source;
+				if (a && a->Is_Weapon_Equipped()) { unit_cost = a->Class_Of().Cost_Of(); }
+				// Kerekupai: define probability of gaining veterancy
+				if (unit_cost > 0)
+				{
+
+					if (unit_cost <= 300) { p = 0.5; }
+					else if (unit_cost > 300 && unit_cost <= 1000) { p = 0.25; }
+					else { p = 0.1; }
+
+					//p = 1.0; // debug
+					//can_gain_veterancy = true; // debug
+					// Kerekupai: veterancy due to friendly fire not allowed
+					if (House != source->House) { can_gain_veterancy = true; }
+				}
+
+				// Kerekupai: aircraft gain veterancy
+				if (a != NULL && a->Strength > 0 && can_gain_veterancy && source->veterancy_level <= 5 &&
+					(double)rand() / (RAND_MAX + 1.0) < p
+					)
+				{
+					rn = rand() % 2;
+					switch (rn) {
+					case 0:
+						source->Armor_levup -= factor;
+						source->array_vet_icons[source->veterancy_level - 1] = 2;
+						//if (a->IsOwnedByPlayer)
+						//	Speak(VOX_UPGRADE_ARMOR);
+						break;
+					case 1:
+						source->Fpower_levup += factor;
+						source->array_vet_icons[source->veterancy_level - 1] = 3;
+						//if (a->IsOwnedByPlayer)
+						//	Speak(VOX_UPGRADE_FIREPOWER);
+						break;
+					default:
+						break;
+					}
+					source->veterancy_level++;
+					if(a->IsOwnedByPlayer)
+						Sound_Effect(VOC_BEEP, a->Coord);
+				}
+				break;
+				// Kerekupai: end of aircraft gain veterancy
+			case RTTI_INFANTRY:
+				// Kerekupai: infantry gain veterancy
+				inf = (InfantryClass *)source;
+				if (inf && inf->Is_Weapon_Equipped()) { unit_cost = inf->Class_Of().Cost_Of(); }
+				// Kerekupai: define probability of gaining veterancy
+				if (unit_cost > 0)
+				{
+
+					if (unit_cost <= 300) { p = 0.5; }
+					else if (unit_cost > 300 && unit_cost <= 1000) { p = 0.25; }
+					else { p = 0.1; };
+
+					//p = 1.0; // debug
+					//can_gain_veterancy = true; // debug
+					// Kerekupai: veterancy due to friendly fire not allowed
+					if (House != source->House) { can_gain_veterancy = true; }
+
+					// Kerekupai: make sure medics and mechanics do not gain veterancy
+					if (*inf == INFANTRY_MEDIC || *inf == INFANTRY_MECHANIC)
+					{
+						can_gain_veterancy = false;
+					}
+				}
+
+
+				if (inf != NULL && inf->Strength > 0 && can_gain_veterancy && source->veterancy_level <= 5 &&
+					(double)rand() / (RAND_MAX + 1.0) < p
+					)
+				{
+					rn = rand() % 3;
+					switch (rn) {
+					case 0:
+						source->Fpower_levup += factor;
+						source->array_vet_icons[source->veterancy_level - 1] = 3;
+						//if (inf->IsOwnedByPlayer)
+						//	Speak(VOX_UPGRADE_FIREPOWER);
+						break;
+					case 1:
+						source->Armor_levup -= factor;
+						source->array_vet_icons[source->veterancy_level - 1] = 2;
+						//if (inf->IsOwnedByPlayer)
+						//	Speak(VOX_UPGRADE_ARMOR);
+						break;
+					case 2:
+						source->ROF_levup -= factor;
+						source->array_vet_icons[source->veterancy_level - 1] = 1;
+						//if (inf->IsOwnedByPlayer)
+						//	Speak(VOX_UPGRADE_SPEED);
+						break;
+					default:
+						break;
+					}
+					source->veterancy_level++;
+					if (inf->IsOwnedByPlayer)
+						Sound_Effect(VOC_BEEP, inf->Coord);
+				}
+				break;
+				// Kerekupai: end of infantry gain veterancy
+			case RTTI_UNIT:
+				// Kerekupai: unit gain veterancy
+				u = (UnitClass *)source;
+				if (u && u->Is_Weapon_Equipped()) { unit_cost = u->Class_Of().Cost_Of(); }
+				// Kerekupai: define probability of gaining veterancy
+				if (unit_cost > 0)
+				{
+
+					if (unit_cost <= 300) { p = 0.5; }
+					else if (unit_cost > 300 && unit_cost <= 1000) { p = 0.25; }
+					else { p = 0.1; }
+
+					//p = 1.0; // debug
+					//can_gain_veterancy = true; // debug
+					// Kerekupai: veterancy due to friendly fire not allowed
+					if (House != source->House) { can_gain_veterancy = true; }
+				}
+
+				// Kerekupai: Tanks RTTI units gain veterancy
+				if (u != NULL && u->Strength > 0 && can_gain_veterancy && source->veterancy_level <= 5 &&
+					(double)rand() / (RAND_MAX + 1.0) < p
+					)
+				{
+					rn = rand() % 3;
+					switch (rn) {
+					case 0:
+						//if (source->FirepowerBias == 1) { source->FirepowerBias = source->FirepowerBias * Inverse(fixed(CrateData[CRATE_FIREPOWER], 256)); }
+						source->Fpower_levup += factor;
+						source->array_vet_icons[source->veterancy_level - 1] = 3;
+						//if (u->IsOwnedByPlayer)
+						//	Speak(VOX_UPGRADE_FIREPOWER);
+						break;
+					case 1:
+						//if (source->ArmorBias == 1) {source->ArmorBias = source->ArmorBias * Inverse(fixed(CrateData[CRATE_ARMOR], 256));}
+						source->Armor_levup -= factor;
+						source->array_vet_icons[source->veterancy_level - 1] = 2;
+						//if (u->IsOwnedByPlayer)
+						//	Speak(VOX_UPGRADE_ARMOR);
+						break;
+					case 2:
+						source->ROF_levup -= factor;
+						source->array_vet_icons[source->veterancy_level - 1] = 1;
+						//if (u->IsOwnedByPlayer)
+						//	Speak(VOX_UPGRADE_SPEED);
+						break;
+					default:
+						break;
+					}
+					source->veterancy_level++;
+					if (u->IsOwnedByPlayer)
+						Sound_Effect(VOC_BEEP, u->Coord);
+				}
+				break;
+				// Kerekupai: end of RTTI units gain veterancy
+			// Kerekupai: vessel gain veterancy
+			case RTTI_VESSEL:
+				v = (VesselClass *)source;
+				if (v && v->Is_Weapon_Equipped()) { unit_cost = v->Class_Of().Cost_Of(); }
+				// Kerekupai: define probability of gaining veterancy
+				if (unit_cost > 0)
+				{
+
+					if (unit_cost <= 300) { p = 0.5; }
+					else if (unit_cost > 300 && unit_cost <= 1000) { p = 0.25; }
+					else { p = 0.1; }
+
+					//p = 1.0; // debug
+					//can_gain_veterancy = true; // debug
+					// Kerekupai: veterancy due to friendly fire not allowed
+					if (House != source->House) { can_gain_veterancy = true; }
+				}
+
+				// Kerekupai: Vessels gain veterancy
+				if (v != NULL && v->Strength > 0 && can_gain_veterancy && source->veterancy_level <= 5 &&
+					(double)rand() / (RAND_MAX + 1.0) < p
+					)
+				{
+					rn = rand() % 3;
+					switch (rn) {
+					case 0:
+						source->Armor_levup -= factor;
+						source->array_vet_icons[source->veterancy_level - 1] = 2;
+						//if (v->IsOwnedByPlayer)
+						//	Speak(VOX_UPGRADE_ARMOR);
+						break;
+					case 1:
+						//fixed val = v->SpeedBias * fixed(CrateData[12], 256);
+						//v->SpeedBias = val;
+						source->Fpower_levup += factor;
+						source->array_vet_icons[source->veterancy_level - 1] = 3;
+						//if (v->IsOwnedByPlayer)
+						//{
+							//Speak(VOX_UPGRADE_SPEED);
+						//	Speak(VOX_UPGRADE_FIREPOWER);
+						//}
+						break;
+					case 2:
+						source->ROF_levup -= factor;
+						source->array_vet_icons[source->veterancy_level - 1] = 1;
+						//if (v->IsOwnedByPlayer)
+						//	Speak(VOX_UPGRADE_SPEED);
+						break;
+					default:
+						break;
+					}
+					source->veterancy_level++;
+					if (v->IsOwnedByPlayer)
+						Sound_Effect(VOC_BEEP, v->Coord);
+				}
+				break;
+				// Kerekupai: end of Vessels gain veterancy
+			default:
+				break;
+			}
+	}
+	/*
+	** Kerekupai: end of source gain veterancy
+	*/ 
 }
 
 
@@ -5030,7 +5509,13 @@ void TechnoClass::Base_Is_Attacked(TechnoClass const * enemy)
 	/*
 	**	Don't overreact if this building can defend itself.
 	*/
-	if (Session.Type == GAME_NORMAL && Techno_Type_Class()->PrimaryWeapon != NULL) return;
+	/*
+	** Kerekupai: units defend base defensive structures in skirmish. Only occasionally in campaign
+	*/
+	if (Session.Type == GAME_NORMAL && Techno_Type_Class()->PrimaryWeapon != NULL && !PlayerPtr->Can_Make_Money() /*(Random_Pick(0, 99) < 70)*/) return;
+	/*
+	** Kerekupai: end of units defend base defensive structures in skirmish. Only occasionally in campaign
+	*/
 
 	/*
 	** If the enemy is not an infantry or a unit there is not much we can
@@ -5651,6 +6136,47 @@ bool TechnoClass::Target_Something_Nearby(ThreatType threat)
 	**	If there is no target, then try to find one and assign it as
 	**	the target for this unit.
 	*/
+	/*
+	** Kerekupai: units prioritize nearby targets
+	*/ 
+	//bool target_found = false;
+	if (/*Mission == MISSION_HUNT*/ !House->IsHuman)
+	{
+		/*if (What_Am_I() == RTTI_INFANTRY && (!Target_Legal(TarCom) || !In_Range(TarCom)))
+		{
+			if (*(InfantryClass *)this == INFANTRY_E3)
+			{
+				Assign_Target(Greatest_Threat(THREAT_RANGE & THREAT_VEHICLES));
+			}
+			else if (Is_Weapon_Equipped()) {
+				Assign_Target(Greatest_Threat(THREAT_RANGE & THREAT_INFANTRY));
+			}
+			if (Target_Legal(TarCom) && In_Range(TarCom)) { target_found = true;  }
+		} 
+		if ((!Target_Legal(TarCom) || !In_Range(TarCom)) && !target_found) {
+			Assign_Target(Greatest_Threat(THREAT_RANGE));
+		}
+		else {
+			if (!Target_Legal(TarCom) && Mission == MISSION_HUNT) {
+				Assign_Target(Greatest_Threat(THREAT_NORMAL));
+			}
+		}*/
+
+		if ((!Target_Legal(TarCom) || !In_Range(TarCom)) /*&& !target_found*/) {
+			Assign_Target(Greatest_Threat(THREAT_RANGE));
+		}
+		if (Target_Legal(TarCom) && !In_Range(TarCom)) {
+			if (Mission == MISSION_HUNT) {
+				Assign_Target(Greatest_Threat(THREAT_NORMAL));
+			}
+			if (Mission == MISSION_GUARD_AREA) {
+				Assign_Target(Greatest_Threat(THREAT_RANGE | THREAT_AREA));
+			}
+		}
+	}
+	/*
+	** Kerekupai: end of units prioritize nearby targets
+	*/
 	if (!Target_Legal(TarCom)) {
 		Assign_Target(Greatest_Threat(threat));
 	}
@@ -6061,7 +6587,11 @@ BuildingClass * TechnoClass::Find_Docking_Bay(StructType b, bool friendly) const
 				**	last qualifying building (as rated by distance), then record
 				**	this building and keep scanning.
 				*/
-				if (bestval == -1 || Distance(building) < bestval || building->IsLeader) {
+				/*
+				** Kerekupai: fix to planes crashing because they are not finding their docking spot
+				*/
+				//if (bestval == -1 || Distance(building) < bestval || building->IsLeader) {
+				if (bestval == -1 || Distance(building) < bestval || (building->IsLeader && House->IsHuman)) {
 					best = building;
 					bestval = Distance(building);
 				}
@@ -6495,7 +7025,7 @@ int TechnoTypeClass::Time_To_Build(HousesType house) const
 		time *= hptr->BuildSpeedBias;
 	}
 	else {
-#if (0)	// No longer desired. ST - 1/18/2021		
+		
 		/*
 		** New feature - Turkey has a 10% build speed bonus even though it isn't specified in the rules
 		*/
@@ -6505,7 +7035,7 @@ int TechnoTypeClass::Time_To_Build(HousesType house) const
 				time /= 10;
 			}
 		}
-#endif		
+		
 		if (What_Am_I() == RTTI_BUILDINGTYPE || What_Am_I() == RTTI_INFANTRYTYPE) {
 			time *= hptr->BuildSpeedBias;
 		}
@@ -6544,12 +7074,19 @@ int TechnoTypeClass::Time_To_Build(HousesType house) const
 #ifdef FIXIT_CSII	//	checked - ajw 9/28/98
 		// Hack: allow the multiple-factory bonus, but only up to two factories if
 		//			this is an AM<->AM game.
-		if (NewUnitsEnabled) {
-			time /= min(divisor, 2);
-		}
-		else {
+		
+		/*
+		** Kerekupai: multiple factory bonus is no longer limited
+		*/
+		//if (NewUnitsEnabled) {
+		//	time /= min(divisor, 2);
+		//}
+		//else {
 			time /= divisor;
-		}
+		//}
+		/*
+		** Kerekupai: end of multiple factory bonus is no longer limited
+		*/
 #else
 		time /= divisor;
 #endif
@@ -6764,7 +7301,6 @@ bool TechnoTypeClass::Read_INI(CCINIClass & ini)
 			}
 		}
 #endif
-
 		IsDoubleOwned = ini.Get_Bool(Name(), "DoubleOwned", IsDoubleOwned);
 		ThreatRange = ini.Get_Lepton(Name(), "GuardRange", ThreatRange);
 		IsExploding = ini.Get_Bool(Name(), "Explodes", IsExploding);
@@ -6792,7 +7328,6 @@ bool TechnoTypeClass::Read_INI(CCINIClass & ini)
 //Mono_Printf("before image=: %s\n",GraphicName);
 		ini.Get_String(Name(), "Image", GraphicName, GraphicName, sizeof(GraphicName));
 //Mono_Printf("after image=: %s\n",GraphicName);if(Random_Pick(0,4)) Keyboard->Get();
-
 		IsLeader = false;
 		if (PrimaryWeapon != NULL && PrimaryWeapon->Attack > 0) {
 			IsLeader = true;

@@ -158,6 +158,27 @@ class TechnoClass :	public RadioClass,
 		fixed ArmorBias;
 		fixed FirepowerBias;
 
+		/* 
+		** Kerekupai: units gain veterancy 
+		*/
+		short veterancy_level;
+		fixed ROF_levup;
+		fixed Armor_levup;
+		fixed Fpower_levup;
+		int array_vet_icons[5]; // five levels; keep track which icon to draw: 1:rof; 2:armor; 3: fpower
+		/* 
+		** Kerekupai: end of units gain veterancy 
+		*/
+
+		/*
+		** Kerekupai: playing with friends?
+		*/
+		//bool gaming_with_friends;
+		//short n_human_players;
+		/*
+		** Kerekupai: end of playing with friends?
+		*/
+
 		/*
 		**	Idle animations (if any are supported by the object type) are regulated by
 		**	this timer. When the timer expires an idle animation occurs. Then the

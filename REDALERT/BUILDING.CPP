@@ -116,6 +116,15 @@ enum SAMState {
 	SAM_FIRING					// Stationary while missile is being fired.
 };
 
+/*
+** Kerekupai: Rally points from CFE PATCH REDUX mod
+*/
+// Chthon CFE Note -- added so we can draw rally point markers directly in remastered graphics mode
+// RA uses different params for this function
+extern void DLL_Draw_Intercept(int shape_number, int x, int y, int width, int height, int flags, const ObjectClass *object, DirType rotation, long scale, const char *shape_file_name, char override_owner);
+/*
+** Kerekupai: end Rally points from CFE PATCH REDUX mod
+*/
 
 /***************************************************************************
 **	Center of building offset table.
@@ -508,6 +517,60 @@ void BuildingClass::Draw_It(int x, int y, WindowNumberType window) const
 			CC_Draw_Shape(ObjectTypeClass::SelectShapes, SELECT_WRENCH, x, y, window, SHAPE_CENTER|SHAPE_WIN_REL);
 		}
 	}
+
+	/*
+	** Kerekupai: CFE PATCH REDUX mod RALLY FEATURE
+	*/
+	// Chthon CFE Note: fixed to work in LAN multiplayer
+	if (Can_Have_Rally_Point() && Is_Selected_By_Player(House) && RallyPoint && Target_Legal(RallyPoint))
+	{
+		int startX, startY, endX, endY;
+		Map.Coord_To_Pixel(Center_Coord(), startX, startY);
+		Map.Coord_To_Pixel(As_Coord(RallyPoint), endX, endY);
+		// remastered renderer
+		if (window == WINDOW_VIRTUAL) {
+			// compute spacing for dots
+			bool negativeX = (startX > endX);
+			bool negativeY = (startY > endY);
+			int Xdistance = endX - startX;
+			if (negativeX) {
+				Xdistance *= -1;
+			}
+			int Ydistance = endY - startY;
+			if (negativeY) {
+				Ydistance *= -1;
+			}
+			float diagonaldistance = sqrt((float)((Xdistance * Xdistance) + (Ydistance * Ydistance)));
+			int steps = (int)(diagonaldistance / 10.0); // spacing needs to be at least as big as the diagonal of the images used or they may overlap
+			float deltaX = (float)Xdistance / (float)steps;
+			float deltaY = (float)Ydistance / (float)steps;
+			// draw a series of small dots
+			for (int i = 0; i < steps; i++) {
+				int diffX = (int)((float)i * deltaX);
+				if (negativeX) {
+					diffX *= -1;
+				}
+				int diffY = (int)((float)i * deltaY);
+				if (negativeY) {
+					diffY *= -1;
+				}
+				//DLL_Draw_Intercept(0, startX + diffX, startY + diffY, 4, 4, SHAPE_WIN_REL | SHAPE_CENTER, const_cast<BuildingClass*>(this), "DOTSML", HOUSE_NONE, 0x100);
+				DLL_Draw_Intercept(0, startX + diffX, startY + diffY, 4, 4, SHAPE_WIN_REL | SHAPE_CENTER, this, DIR_N, 0x0100, "DOTSML", HOUSE_NONE);
+			}
+			// draw the big dot at the end
+			if ((Owner() == HOUSE_BAD) || (Owner() == HOUSE_USSR) || (Owner() == HOUSE_UKRAINE) || (House->ActLike == HOUSE_BAD) || (House->ActLike == HOUSE_USSR) || (House->ActLike == HOUSE_UKRAINE)) {
+				//DLL_Draw_Intercept(0, endX, endY, 8, 8, SHAPE_WIN_REL | SHAPE_CENTER, const_cast<BuildingClass*>(this), "DOTUSSR", HOUSE_NONE, 0x100);
+				DLL_Draw_Intercept(0, endX, endY, 8, 8, SHAPE_WIN_REL | SHAPE_CENTER, this, DIR_N, 0x0100, "DOTUSSR", HOUSE_NONE);
+			}
+			else {
+				//DLL_Draw_Intercept(0, endX, endY, 8, 8, SHAPE_WIN_REL | SHAPE_CENTER, const_cast<BuildingClass*>(this), "DOTALLY", HOUSE_NONE, 0x100);
+				DLL_Draw_Intercept(0, endX, endY, 8, 8, SHAPE_WIN_REL | SHAPE_CENTER, this, DIR_N, 0x0100, "DOTALLY", HOUSE_NONE);
+			}
+		}
+	}
+		/*
+		** Kerekupai: end of CFE PATCH REDUX mod RALLY FEATURE
+		*/
 
 	TechnoClass::Draw_It(x, y, window);
 
@@ -960,6 +1023,37 @@ void BuildingClass::AI(void)
 	Repair_AI();
 
 	/*
+	** Kerekupai: oil derrick gives money
+	*/ 
+	if (*this == STRUCT_PUMP && Frame % 330 == 0) {
+		House->Refund_Money(20);
+	}
+	/*
+	** Kerekupai: end of oil derrick gives money
+	*/
+
+	/*
+	** Kerekupai: update hospital healing status
+	*/
+	if (*this == STRUCT_HOSPITAL)
+	{
+		update_healing_state(false);
+		for (int index = 0; index < Infantry.Count(); index++) {
+			InfantryClass * i = Infantry.Ptr(index);
+			if (i != NULL && !i->IsInLimbo && i->Strength > 0 && i->Strength < i->Class_Of().MaxStrength &&
+				(Owner() == HOUSE_NEUTRAL || i->House->Is_Ally(House)) &&
+				Lepton_To_Cell(::Distance(Coord, i->Center_Coord())) <= 3
+				)
+			{
+				update_healing_state(true);
+			}
+		}
+	}
+	/*
+	** Kerekupai: end of update hospital healing status
+	*/
+
+	/*
 	**	For computer controlled buildings, determine what should be produced and start
 	**	production accordingly.
 	*/
@@ -1082,6 +1176,10 @@ bool BuildingClass::Unlimbo(COORDINATE coord, DirType dir)
 	*/
 	if (Class->IsWall) {
 		if (Can_Enter_Cell(Coord_Cell(coord), FACING_NONE) == MOVE_OK) {
+			/*
+			** Building to Overlay mapping has been extracted to its own helper method.
+			** pchote - "Modern Wall Building" mod.
+			**
 			OverlayType otype = OVERLAY_NONE;
 			switch (Class->Type) {
 				case STRUCT_SANDBAG_WALL:
@@ -1113,6 +1211,8 @@ bool BuildingClass::Unlimbo(COORDINATE coord, DirType dir)
 					break;
 
 			}
+			*/
+			OverlayType otype = Class->Overlay_Type();
 			if (otype != OVERLAY_NONE) {
 				ObjectClass * o = OverlayTypeClass::As_Reference(otype).Create_One_Of(House);
 				if (o && o->Unlimbo(coord)) {
@@ -1633,6 +1733,14 @@ BuildingClass::BuildingClass(StructType type, HousesType house) :
 	Strength = Class->MaxStrength;
 	Ammo = Class->MaxAmmo;
 
+	// Kerekupai: spies jamm radar and power plants
+	//jammed_by_spy = false;
+
+	/*
+	** Kerekupai: initialization of is_healing status (used for hospitals)
+	*/
+	is_healing = false;
+
 	/*
 	**	If the building could never be built, then it can never be sold either. This
 	**	is due to the lack of buildup animation.
@@ -1645,6 +1753,15 @@ BuildingClass::BuildingClass(StructType type, HousesType house) :
 //	if (Session.Type == GAME_INTERNET) {
 //		House->BuildingTotals->Increment_Unit_Total( (int) type);
 //	}
+
+	/*
+	** Kerekupai: CFE PATCH REDUX MOD RALLY POINT
+	*/
+	// Chthon CFE Note: Initialize mod stuff
+	RallyPoint = TARGET_NONE;
+	/*
+	** Kerekupai: end CFE PATCH REDUX MOD RALLY POINT
+	*/
 
 }
 
@@ -1815,6 +1932,16 @@ void BuildingClass::Active_Click_With(ActionType action, ObjectClass * object)
 	if (action == ACTION_TOGGLE_PRIMARY && Class->Is_Factory()) {
 		OutList.Add(EventClass(EventClass::PRIMARY, TargetClass(this)));
 	}
+
+	/*
+	** Kerekupai: CFE PATCH REDUX MOD RALLY POINT
+	*/
+	if (action == ACTION_MOVE && Can_Have_Rally_Point()) {
+		Player_Set_Rally_Point(object->As_Target());
+	}
+	/*
+	** Kerekupai: end CFE PATCH REDUX MOD RALLY POINT
+	*/
 }
 
 
@@ -1845,6 +1972,11 @@ void BuildingClass::Active_Click_With(ActionType action, CELL cell)
 		Player_Assign_Mission(MISSION_ATTACK, ::As_Target(cell));
 	}
 
+
+	/*
+	** Kerekupai: CFE PATCH REDUX MOD RALLY POINT
+	*/
+	/* ORIGINAL CODE
 	if (action == ACTION_MOVE && *this == STRUCT_CONST) {
 		OutList.Add(EventClass(EventClass::ARCHIVE, TargetClass(this), TargetClass(::As_Target(cell))));
 		OutList.Add(EventClass(EventClass::SELL, TargetClass(this)));
@@ -1852,6 +1984,24 @@ void BuildingClass::Active_Click_With(ActionType action, CELL cell)
 		COORDINATE coord = Map.Pixel_To_Coord(Get_Mouse_X(), Get_Mouse_Y());
 		OutList.Add(EventClass(ANIM_MOVE_FLASH, PlayerPtr->Class->House, coord, 1 << PlayerPtr->Class->House));
 	}
+	   END ORIGINAL CODE
+	*/
+	if (action == ACTION_MOVE) {
+
+		if (*this == STRUCT_CONST) {
+			OutList.Add(EventClass(EventClass::ARCHIVE, TargetClass(this), TargetClass(::As_Target(cell))));
+			OutList.Add(EventClass(EventClass::SELL, TargetClass(this)));
+
+			COORDINATE coord = Map.Pixel_To_Coord(Get_Mouse_X(), Get_Mouse_Y());
+			OutList.Add(EventClass(ANIM_MOVE_FLASH, PlayerPtr->Class->House, coord, 1 << PlayerPtr->Class->House));
+		}
+		else if (Can_Have_Rally_Point()) {
+			Player_Set_Rally_Point(::As_Target(cell));
+		}
+	}
+	/*
+	** Kerekupai: end CFE PATCH REDUX MOD RALLY POINT
+	*/
 }
 
 
@@ -1879,6 +2029,18 @@ void BuildingClass::Assign_Target(TARGET target)
 	if (*this != STRUCT_SAM && *this != STRUCT_AAGUN && !In_Range(target, 0)) {
 		target = TARGET_NONE;
 	}
+
+	/*
+	** Kerekupai: CFE PATCH REDUX MOD RALLY POINT
+	*/
+	if (RallyPoint != target && Can_Have_Rally_Point() && (target == TARGET_NONE || Target_Legal(target))) {
+		RallyPoint = target;
+		Map.Flag_To_Redraw(true);
+		return;
+	}
+	/*
+	** Kerekupai: end CFE PATCH REDUX MOD RALLY POINT
+	*/
 
 	TechnoClass::Assign_Target(target);
 }
@@ -1952,37 +2114,141 @@ int BuildingClass::Exit_Object(TechnoClass * base)
 
 	switch (base->What_Am_I()) {
 
-		case RTTI_AIRCRAFT:
-			if (!In_Radio_Contact()) {
-				AircraftClass * air = (AircraftClass *)base;
+	case RTTI_AIRCRAFT:
+		if (!In_Radio_Contact()) {
+			AircraftClass * air = (AircraftClass *)base;
+			
+			air->Height = 0;
+			ScenarioInit++;
+			if (air->Unlimbo(Docking_Coord(), air->Pose_Dir())) {
+				Transmit_Message(RADIO_HELLO, air);
+				Transmit_Message(RADIO_TETHER);
 
-				air->Height = 0;
-				ScenarioInit++;
-				if (air->Unlimbo(Docking_Coord(), air->Pose_Dir())) {
-					Transmit_Message(RADIO_HELLO, air);
-					Transmit_Message(RADIO_TETHER);
-					ScenarioInit--;
-					return(2);
+				/*
+				** Kerekupai: make transport helis find a landing spot near the helipad instead
+				*/
+				if (*air == AIRCRAFT_TRANSPORT && Session.Type != GAME_NORMAL)
+				{
+					air->Transmit_Message(RADIO_OVER_OUT);
+					air->Process_Take_Off();
+					BuildingClass * nearest = Find_Docking_Bay(STRUCT_HELIPAD, false);
+					if (nearest) {
+						Assign_Destination(::As_Target(nearest->Nearby_Location(air)));
+						//air->Assign_Mission(MISSION_GUARD_AREA);
+					}
+					else {
+						air->Scatter(0, true);
+					}
 				}
-				ScenarioInit--;
-			} else {
-				AircraftClass * air = (AircraftClass *)base;
+				/*
+				** Kerekupai: end of make transport helis find a landing spot near the helipad instead
+				*/
 
-				if (Cell_X(Coord_Cell(Center_Coord())) - Map.MapCellX < Map.MapCellWidth/2) {
+				ScenarioInit--;
+				return(2);
+			}
+			ScenarioInit--;
+		}
+		else {
+			AircraftClass * air = (AircraftClass *)base;
+			/*
+			** Kerekupai: helis enter scenario from closest map border to active helipad
+			*/
+				/*if (Cell_X(Coord_Cell(Center_Coord())) - Map.MapCellX < Map.MapCellWidth/2) {
 					cell = XY_Cell(Map.MapCellX-1, Random_Pick(0, Map.MapCellHeight-1)+Map.MapCellY);
 				} else {
 					cell = XY_Cell(Map.MapCellX+Map.MapCellWidth, Random_Pick(0, Map.MapCellHeight-1)+Map.MapCellY);
+				}*/
+				/* EXPLAINING THE MAP AREA
+				** quadrants: 2	1
+				**			  3 4
+				** x and y are located at the top left corner
+				** the value range of cellx is [x, x + max_x]
+				** the value range of celly is [y, y + max_y]
+				*/
+				int max_x = Map.MapCellWidth;
+				int max_y = Map.MapCellHeight;
+				int x = Map.MapCellX;
+				int y = Map.MapCellY;
+				int pad_x = Cell_X(Coord_Cell(Center_Coord())); // x coord from helipad
+				int pad_y = Cell_Y(Coord_Cell(Center_Coord()));
+				int enter_x = 0; // coord to enter the map
+				int enter_y = 0;
+				DirType dir;	 // desired facing
+
+				// check the quadrant and assign as entering coord the closest coord to pad
+				if (pad_x > (x + max_x) / 2) { // right (1st or 4th quadrant)
+
+					if (pad_y < (y + max_y) / 2) { // if Quadrant 1
+						if (unsigned((x + max_x) - pad_x) < unsigned(pad_y)) {
+							enter_x = x + max_x;
+							enter_y = pad_y;
+							dir = DIR_W;
+						}
+						else {
+							enter_x = pad_x;
+							enter_y = y;
+							dir = DIR_S;
+						}
+					}
+					else { // if Quadrant 4
+						if (unsigned((x + max_x) - pad_x) < unsigned((y + max_y) - pad_y)) {
+							enter_x = x + max_x;
+							enter_y = pad_y;
+							dir = DIR_W;
+						}
+						else {
+							enter_x = pad_x;
+							enter_y = y + max_y;
+							dir = DIR_N;
+						}
+					}
 				}
+				else {
+					if (pad_y < (y + max_y) / 2) { // if Quadrant 2
+						if (pad_x < pad_y) {
+							enter_x = x;
+							enter_y = pad_y;
+							dir = DIR_E;
+						}
+						else {
+							enter_x = pad_x;
+							enter_y = y;
+							dir = DIR_S;
+						}
+					}
+					else { // if Quadrant 3
+						if (unsigned(pad_x) < unsigned((y + max_y) - pad_y)) {
+							enter_x = x;
+							enter_y = pad_y;
+							dir = DIR_E;
+						}
+						else {
+							enter_x = pad_x;
+							enter_y = y + max_y;
+							dir = DIR_N;
+						}
+					}
+				}
+				// Assign the enter coordinates
+				cell = XY_Cell(enter_x, enter_y);
+
 				ScenarioInit++;
-				if (air->Unlimbo(Cell_Coord(cell), DIR_N)) {
-//BG				air->Assign_Destination(::As_Target(Nearby_Location(air)));
-/*BG*/			air->Assign_Destination(::As_Target(air->Nearby_Location(this)));
+				//if (air->Unlimbo(Cell_Coord(cell), DIR_N)) {
+				if (air->Unlimbo(Cell_Coord(cell), dir)) {
+					//BG				air->Assign_Destination(::As_Target(Nearby_Location(air)));
+					/*BG*/			air->Assign_Destination(::As_Target(air->Nearby_Location(this)));
 					air->Assign_Mission(MISSION_MOVE);
 					ScenarioInit--;
 					return(2);
 				}
 				ScenarioInit--;
-			}
+
+			
+		}
+	/*
+	** Kerekupai: end of helis enter scenario from closest map border to active helipad
+	*/
 			break;
 
 		case RTTI_VESSEL:
@@ -1992,7 +2258,20 @@ int BuildingClass::Exit_Object(TechnoClass * base)
 					ScenarioInit++;
 					cell = Find_Exit_Cell(base);
 					if (cell != 0 && base->Unlimbo(Cell_Coord(cell), Direction(Cell_Coord(cell)))) {
-						base->Assign_Mission(MISSION_GUARD);
+						/*
+						** Kerekupai: CFE PATCH REDUX MOD RALLY POINT
+						*/
+						if (House->IsHuman && Target_Legal(RallyPoint))
+						{
+							base->Assign_Mission(MISSION_MOVE);
+							base->Assign_Destination(RallyPoint);
+						}
+						else {
+							base->Assign_Mission(MISSION_GUARD);
+						}
+						/*
+						** Kerekupai: end CFE PATCH REDUX MOD RALLY POINT
+						*/
 						ScenarioInit--;
 						return(2);
 					}
@@ -2048,6 +2327,21 @@ int BuildingClass::Exit_Object(TechnoClass * base)
 						Transmit_Message(RADIO_HELLO, base);
 						Transmit_Message(RADIO_TETHER);
 						Assign_Mission(MISSION_UNLOAD);
+
+						/*
+						** Kerekupai: send unit to rally point
+						*/
+						/*
+						if (House->IsHuman && Target_Legal(RallyPoint) && *((UnitClass *)base) != UNIT_HARVESTER)
+						{
+							base->Assign_Mission(MISSION_MOVE);
+							base->Assign_Destination(RallyPoint);
+						}
+						*/
+						/*
+						** Kerekupai: end of send unit to rally point
+						*/
+
 						ScenarioInit--;
 						return(2);
 					}
@@ -2077,6 +2371,18 @@ int BuildingClass::Exit_Object(TechnoClass * base)
 								base->Assign_Mission(MISSION_GUARD_AREA);
 								base->ArchiveTarget = ::As_Target(House->Where_To_Go((FootClass *)base));
 							}
+
+							/*
+							** Kerekupai: send inf to rally point
+							*/
+							if (House->IsHuman && Target_Legal(RallyPoint))
+							{
+								base->Assign_Mission(MISSION_MOVE);
+								base->Assign_Destination(RallyPoint);
+							}
+							/*
+							** Kerekupai: end of send inf to rally point
+							*/
 
 							/*
 							**	Establish radio contact so unload coordination can occur. This
@@ -2857,9 +3163,20 @@ ActionType BuildingClass::What_Action(ObjectClass const * object) const
 		action = ACTION_NONE;
 	}
 
+	/*
+	** Kerekupai: CFE PATCH REDUX MOD RALLY POINTS
+	*/
+	/* ORIGINAL CODE
 	if (action == ACTION_MOVE) {
 		action = ACTION_NONE;
+	}  ORIGINAL CODE
+	*/
+	if (action == ACTION_MOVE && !Can_Have_Rally_Point()) {
+		action = ACTION_NONE;
 	}
+	/*
+	** Kerekupai: end CFE PATCH REDUX MOD RALLY POINTS
+	*/
 
 	return(action);
 }
@@ -2888,9 +3205,15 @@ ActionType BuildingClass::What_Action(CELL cell) const
 
 	ActionType action = TechnoClass::What_Action(cell);
 
-	if (action == ACTION_MOVE && (*this != STRUCT_CONST || !Is_MCV_Deploy())) {
+	/*
+	** Kerekupai: CFE PATCH REDUX MOD RALLY POINT
+	*/
+	if (action == ACTION_MOVE && !Can_Have_Rally_Point() && (*this != STRUCT_CONST || !Is_MCV_Deploy())) {
 		action = ACTION_NONE;
 	}
+	/*
+	** Kerekupai: end CFE PATCH REDUX MOD RALLY POINT
+	*/
 
 	/*
 	**	Don't allow targeting of SAM sites, even if the CTRL key
@@ -3166,6 +3489,15 @@ bool BuildingClass::Captured(HouseClass * newowner)
 #endif
 
 		/*
+		** Kerekupai: reward the newowner if it has captured a neutral oil derrick
+		*/
+		if (*this == STRUCT_PUMP && Owner() < HOUSE_MULTI1)
+			newowner->Refund_Money(330);
+		/*
+		** Kerekupai: end of if the captured building is an oil derrick, then refund the player an amount of cash
+		*/
+
+		/*
 		** Maybe trigger an achivement. ST - 11/14/2019 1:53PM
 		*/
 		if (newowner->IsHuman) {
@@ -3183,8 +3515,8 @@ bool BuildingClass::Captured(HouseClass * newowner)
 		** Make sure the capturer isn't spying on his own building, and if
 		** it was a radar facility, update the target house's RadarSpied field.
 		*/
-		if (SpiedBy & (1<<(newowner->Class->House)) ) {
-			SpiedBy -= (1<<(newowner->Class->House));
+		if (SpiedBy & (1 << (newowner->Class->House))) {
+			SpiedBy -= (1 << (newowner->Class->House));
 			if (*this == STRUCT_RADAR) {
 				Update_Radar_Spied();
 			}
@@ -3200,7 +3532,7 @@ bool BuildingClass::Captured(HouseClass * newowner)
 			IsJamming = false;
 			Arm = 0;
 		}
-
+		
 		/*
 		** Add this building to the list of buildings captured this game. For internet stats purposes.
 		*/
@@ -3330,6 +3662,15 @@ bool BuildingClass::Captured(HouseClass * newowner)
 			oldowner->Check_Pertinent_Structures();
 		}
 
+		/*
+		** Kerekupai: CFE PATCH REDUX MOD RALLY POINT
+		*/
+		// Chthon CFE Note -- clear out rally point and inverse placement markers
+		RallyPoint = TARGET_NONE;
+		/*
+		** Kerekupai: end CFE PATCH REDUX MOD RALLY POINT
+		*/
+
 		return(true);
 	}
 	return(false);
@@ -3407,9 +3748,15 @@ MoveType BuildingClass::Can_Enter_Cell(CELL cell, FacingType) const
 	assert(Buildings.ID(this) == ID);
 	assert(IsActive);
 
-	if (*this == STRUCT_CONST && IsDown) {
+	/*
+	** Kerekupai: CFE PATCH REDUX MOD RALLY POINT
+	*/
+	if (IsDown && IsLocked && (Can_Have_Rally_Point() || *this == STRUCT_CONST)) {
 		return(Map[cell].Is_Clear_To_Build(Class->Speed) ? MOVE_OK : MOVE_NO);
 	}
+	/*
+	** Kerekupai: end CFE PATCH REDUX MOD RALLY POINT
+	*/
 
 	if (!Debug_Map && ScenarioInit == 0 && Session.Type == GAME_NORMAL && House->IsPlayerControl && !Map[cell].IsMapped) {
 		return(MOVE_NO);
@@ -4236,6 +4583,19 @@ int BuildingClass::Mission_Repair(void)
 ///*BG*/					if(radio->Health_Ratio() >= Rule.ConditionGreen) {
 //								Transmit_Message(RADIO_RUN_AWAY);
 //							}
+
+						/*
+						** Kerekupai: units exit repair bay when full health / minelayers when full health and ammo
+						*/ 
+						if ((*(UnitClass *)radio != UNIT_MINELAYER || (((UnitClass *)radio)->Ammo >= ((UnitClass *)radio)->Class->MaxAmmo)) && 
+							((UnitClass *)radio)->Strength >= ((UnitClass *)radio)->Class->MaxStrength)
+						{
+							 Transmit_Message(RADIO_RUN_AWAY);
+						}
+							
+						/*
+						** Kerekupai: end of units exit repair bay when full health / minelayers when full health and ammo
+						*/
 					}
 				}
 				break;
@@ -4287,6 +4647,26 @@ int BuildingClass::Mission_Repair(void)
 							// if (IsOwnedByPlayer) Speak(VOX_UNIT_REPAIRED);
 							if (IsOwnedByPlayer) Speak(VOX_UNIT_REPAIRED, House);
 
+							/*
+							** Kerekupai: units exit repair facility when full health
+							*/
+							if (Contact_With_Whom()->What_Am_I() == RTTI_UNIT &&
+								((UnitClass *)Contact_With_Whom())->Strength >= ((UnitClass *)Contact_With_Whom())->Class->MaxStrength)
+							{
+								if (*((UnitClass *)Contact_With_Whom()) == UNIT_HARVESTER) {
+									//((UnitClass *)Contact_With_Whom())->Transmit_Message(RADIO_OVER_OUT);
+									Transmit_Message(RADIO_RUN_AWAY);
+									((UnitClass *)Contact_With_Whom())->Assign_Mission(MISSION_HARVEST);
+								}
+								else {
+									Transmit_Message(RADIO_RUN_AWAY);
+
+								}
+							}
+							/*
+							** Kerekupai: end of units exit repair facility when full health
+							*/
+
 //							Transmit_Message(RADIO_RUN_AWAY);
 							Begin_Mode(BSTATE_IDLE);
 							Status = IDLE;
@@ -4298,7 +4678,7 @@ int BuildingClass::Mission_Repair(void)
 						*/
 						case RADIO_NEGATIVE:
 						default:
-//							Transmit_Message(RADIO_RUN_AWAY);
+								//Transmit_Message(RADIO_RUN_AWAY);
 							Begin_Mode(BSTATE_IDLE);
 							Status = IDLE;
 							break;
@@ -4872,6 +5252,14 @@ int BuildingClass::Mission_Unload(void)
 						unit->Force_Track(DriveClass::OUT_OF_WEAPON_FACTORY, coord);
 //						unit->Force_Track(DriveClass::OUT_OF_WEAPON_FACTORY, Adjacent_Cell(Adjacent_Cell(Center_Coord(), FACING_S), FACING_S));
 						unit->Set_Speed(128);
+						/*
+						** Kerekupai: assign rally point
+						*/
+						if (House->IsHuman && Target_Legal(RallyPoint) && *unit != UNIT_HARVESTER)
+							unit->Assign_Destination(RallyPoint);
+						/*
+						** Kerekupai: end of assign rally point
+						*/
 						Status = LEAVE;
 					} else {
 						Close_Door(DOOR_RATE, DOOR_STAGES);
@@ -4972,6 +5360,16 @@ void BuildingClass::Detach(TARGET target, bool all)
 	if (target == AnimToTrack) {
 		AnimToTrack = TARGET_NONE;
 	}
+	/*
+	** Kerekupai: CFE PATCH REDUX MOD RALLY POINT
+	*/
+	//Chthon CFE Note: Should also clear out rally point if it was attached to a techno object that died
+	if (target == RallyPoint) {
+		RallyPoint = TARGET_NONE;
+	}
+	/*
+	** Kerekupai: end CFE PATCH REDUX MOD RALLY POINT
+	*/
 }
 
 
@@ -5204,7 +5602,13 @@ bool BuildingClass::Can_Player_Move(void) const
 	assert(Buildings.ID(this) == ID);
 	assert(IsActive);
 
-	return(*this == STRUCT_CONST && (Mission == MISSION_GUARD) && Special.IsMCVDeploy);
+	/*
+	** Kerekupai: CFE PATCH REDUX MOD RALLY POINT
+	*/
+	return Can_Have_Rally_Point() || (*this == STRUCT_CONST && (Mission == MISSION_GUARD) && Special.IsMCVDeploy);
+	/*
+	** Kerekupai: end CFE PATCH REDUX MOD RALLY POINT
+	*/
 }
 
 
@@ -5341,7 +5745,6 @@ void BuildingClass::Read_INI(CCINIClass & ini)
 	CELL						cell;			// Cell of building.
 	char						buf[128];
 	char						* trigname;	// building's trigger's name
-
 
 	int len = ini.Entry_Count(INI_Name());
 	for (int index = 0; index < len; index++) {
@@ -6086,3 +6489,129 @@ unsigned BuildingClass::Spied_By() const
 
 	return spiedby;
 }
+
+/***********************************************************************************************
+ * BuildingClass::update_healing_state -- Update the healing state of the building             *
+ *                                                                                             *
+ *    This routine is intended only for hospitals to keep track of their healing state		   *
+ *    If the hospital is healing infantry, then it will take true as argument				   *
+ *                                                                                             *
+ * INPUT:   bool -- Is the hospital currently healing infantry							       *
+ *                                                                                             *
+ * OUTPUT:  None																		       *
+ *                                                                                             *
+ * WARNINGS:   None										                                       *
+ *                                                                                             *
+ * HISTORY:                                                                                    *
+ *   20/Aug/2022 Kerekupai : Created.                                                          *
+ *=============================================================================================*/
+void BuildingClass::update_healing_state(bool state) {
+	is_healing = state;
+}
+
+/***********************************************************************************************
+ * BuildingClass::get_healing_state -- get the healing state of the building	               *
+ *                                                                                             *
+ *    This routine is intended only for hospitals to keep track of their healing state		   *
+ *                                                                                             *
+ * INPUT:   None																		       *
+ *                                                                                             *
+ * OUTPUT:  bool -- true if the hospital is currently healing infantry					       *
+ *                                                                                             *
+ * WARNINGS:   None										                                       *
+ *                                                                                             *
+ * HISTORY:                                                                                    *
+ *   20/Aug/2022 Kerekupai : Created.                                                          *
+ *=============================================================================================*/
+bool  BuildingClass::get_healing_state() {
+	return (is_healing);
+}
+
+/*
+** Kerekupai: Rally points from CFE PATCH REDUX mod
+*/
+/***********************************************************************************************
+ * BuildingClass::Can_Have_Rally_Point -- Query if a building can have a rally point.          *
+ *                                                                                             *
+ *    This routine simply checks the buildings type against a hard coded list.                 *
+ *    of buildings that may set a rally point for produced units.                              *
+ *                                                                                             *
+ * INPUT:   None                                                                               *
+ *                                                                                             *
+ * OUTPUT:  True if true false if false                                                        *
+ *                                                                                             *
+ * WARNINGS:   none                                                                            *
+ *                                                                                             *
+ * HISTORY:                                                                                    *
+ *   07/06/2020 cfehunter : Created.                                                           *
+ *=============================================================================================*/
+bool BuildingClass::Can_Have_Rally_Point() const
+{
+
+	switch (Class->ToBuild)
+	{
+	case RTTI_INFANTRYTYPE:
+	case RTTI_UNITTYPE:
+	case RTTI_VESSELTYPE:
+		return true;
+
+	default:
+		return false;
+
+	}
+}
+
+void BuildingClass::Set_Unselected_By_Player(HouseClass* player)
+{
+	TechnoClass::Set_Unselected_By_Player(player);
+
+
+	if (Can_Have_Rally_Point() && RallyPoint)
+	{
+		Map.Flag_To_Redraw(true);
+	}
+}
+
+void BuildingClass::Player_Set_Rally_Point(TARGET target)
+{
+	OutList.Add(EventClass(EventClass::SET_RALLY, TargetClass(As_Target()), TargetClass(target)));
+}
+
+TARGET BuildingClass::Target_For_Rally_Point(const SpeedType speed) const
+{
+	return Target_Legal(RallyPoint) ?
+		(Is_Target_Cell(RallyPoint) ? ::As_Target(Map.Nearby_Location(As_Cell(RallyPoint), speed)) : RallyPoint) :
+		::As_Target(Nearby_Location());
+}
+
+/***********************************************************************************************
+ * BuildingClass::Rally_Unit -- Order a unit to the buildings rally point                      *
+ *                                                                                             *
+ *    This routine will attempt to order a unit to move the the buildings rally point.         *
+ *    If the building has a rally point, and the unit should be rallyed.                       *
+ *                                                                                             *
+ * INPUT:   unit - unit to rally                                                               *
+ *                                                                                             *
+ * OUTPUT:  true if successful                                                                 *
+ *                                                                                             *
+ * WARNINGS: none                                                                              *
+ *                                                                                             *
+ * HISTORY:                                                                                    *
+ *   14/06/2020 cfehunter : Created.                                                           *
+ *=============================================================================================*/
+bool BuildingClass::Rally_Unit(TechnoClass& unit)
+{
+	if (Can_Have_Rally_Point() && CFE_Patch_Unit_Should_Rally(unit) && Target_Legal(RallyPoint))
+	{
+
+		const TARGET rallyTarget = Target_For_Rally_Point();
+
+		//Make sure units dont rally to themselves. Only a problem for repair/reload pads
+		long move_target = (long)(unit.As_Target() != rallyTarget ? rallyTarget : ::As_Target(Nearby_Location()));
+		return Target_Legal(move_target) && Transmit_Message(RADIO_MOVE_HERE, move_target, &unit) == RADIO_ROGER;
+	}
+	return false;
+}
+/*
+** Kerekupai: end Rally points from CFE PATCH REDUX mod
+*/
