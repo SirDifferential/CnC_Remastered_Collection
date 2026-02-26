@@ -1,0 +1,16 @@
+{ 
+
+"name": "Gekko AI mod", 
+
+"description": "Vanilla-friendly AI improvement mod",
+
+"author": "Gekko", 
+
+"load_order": 1, 
+
+"version_low": 0, 
+
+"version_high": 1, 
+
+"game_type": "RA" 
+}

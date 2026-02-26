@@ -813,6 +813,7 @@ void Clear_Scenario(void)
 	Score.Init();
 	Logic.Init();
 
+	// GEKKO TODO: Init BuildOrder here?
 	HouseClass::Init();
 	ObjectClass::Init();
 	TeamTypeClass::Init();

@@ -1071,6 +1071,8 @@ template <>class DynamicVectorClass<ActionChoiceClass *>;
 extern DynamicVectorClass<ActionChoiceClass *> xxx3;
 template <>class DynamicVectorClass<EgoClass *>;
 extern DynamicVectorClass<EgoClass *> whatever;
+template <> class DynamicVectorClass<CCPtr<StructType> >;
+extern DynamicVectorClass<CCPtr<StructType> > y999;
 
 /*
 ** Debug output. ST - 6/27/2019 10:00PM

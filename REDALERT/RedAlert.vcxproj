@@ -136,6 +136,7 @@
     <ClCompile Include="BLWSTRAW.CPP" />
     <ClCompile Include="BUFF.CPP" />
     <ClCompile Include="BUILDING.CPP" />
+    <ClCompile Include="BUILDORDER.CPP" />
     <ClCompile Include="BULLET.CPP" />
     <ClCompile Include="CARGO.CPP" />
     <ClCompile Include="CARRY.CPP" />
@@ -426,6 +427,7 @@
     <ClInclude Include="BUFF.H" />
     <ClInclude Include="BUFFERX.H" />
     <ClInclude Include="BUILDING.H" />
+    <ClInclude Include="BUILDORDER.H" />
     <ClInclude Include="BULLET.H" />
     <ClInclude Include="CARGO.H" />
     <ClInclude Include="CARRY.H" />

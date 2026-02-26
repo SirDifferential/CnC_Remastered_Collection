@@ -1,0 +1,11 @@
+* [ ] Change `AI Controls` in Rules.ini
+* [ ] Change `IsTiberiumShort` to improve AI economy
+* [ ] Investigate Rule.RefineryLimit
+* [ ] AI is scripted to float money, reduce floating
+* [ ] Increase every team's size so AI uses bigger squads to perform missions
+* [ ] Implement a simple early game build order system
+	* [ ] Basic economy focus: Power plant, refinery, barracks, 5x infantry, refinery, power plant, war factory, ore truck, power plant, refinery, radar home, advanced power plant, let AI take the wheel after this
+	* [ ] Careful focus: Power plant, barracks, 5x infantry, refinery, war factory, ore truck, tank, power plant, radar dome, advanced power plant
+* Write a MISSION.H entry for "guard ore field" or "harash enemy harvester"
+* Look at this for debug: `TACTION_REVEAL_ALL`
+* Test BuildOrder for save/load
